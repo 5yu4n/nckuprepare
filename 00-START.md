@@ -17,6 +17,24 @@
 | [cheatsheet.md](cheatsheet.md) | 所有查證過的 API 名稱與用法（DMA、PIO、多核、鎖、ROS 2） | 不確定某個函式存不存在時 |
 | [optimization.md](optimization.md) | 各種優化技巧的細節、前後對照、實測數字 | 想知道某招為什麼有效時 |
 
+## 開考後第一個 10 分鐘：環境偵察（每項都記在紙上）
+
+先弄清楚環境，後面才不會白做。指令以 Linux 為準，Windows 就看檔案總管與題目說明。
+
+| 要知道的 | 怎麼看 | 影響什麼 |
+|---|---|---|
+| 架構：RISC-V 還是 Arm | `grep -e PICO_PLATFORM: -e PICO_BOARD: -e CMAKE_C_COMPILER: build/CMakeCache.txt`（`rp2350-riscv` 或 `rp2350-arm-s`）；或看編譯器名稱：`riscv32-*-elf-gcc` 是 RISC-V，`arm-none-eabi-gcc` 是 Arm | Arm 版：prompt A 刪掉【RP2350 RISC-V 事實】那段；`rp2350-riscv.md` 只在 RISC-V 用 |
+| SDK 版本 | `grep 'set(PICO_SDK_VERSION_' $PICO_SDK_PATH/pico_sdk_version.cmake` | 2.2.0 以前沒有 `dma_channel_config_t`、`dma_encode_transfer_count`（cheatsheet 有標） |
+| 有哪些工具 | `which picotool cmake ninja make riscv32-unknown-elf-gcc arm-none-eabi-gcc` | 沒有 picotool 就用拖放 `.uf2` 燒錄 |
+| 怎麼提交、看什麼分數 | 題目說明 | 決定先求對還是先求快 |
+| 小模型能力 | 貼 A，問「RP2350 的 DMA count 單位是什麼？」，要答「傳輸筆數」；再問「A 裡最後一條事實是什麼？」答得出來才代表 A 沒被截斷 | 答不好就改用 A-mini，題目只貼相關函式 |
+
+**第一件實作的事：原版程式不改，先建置、跑一次、記下輸出和時間。** 這是之後每一版對拍與比速度的基準。
+
+**每一版都留檔**：`cp main.c v1_ok.c`、`v2_dma.c`……檔名寫「有沒有通過」。評測不能同時提交多次，出錯時可以馬上交回上一個正確版。
+
+**板子出狀況時**：純計算的部分可以先在電腦上用一般 `gcc -O2` 測正確性（[build-and-debug.md](build-and-debug.md) 的 `bench.h` 在電腦上也能用），等板子好了再上板量。
+
 ## 考試當天流程
 
 | 時間 | 做什麼 |
@@ -40,6 +58,7 @@
 7. **量**：`BENCH`，記下數字。
 8. **提交**：一次一個，等結果回來才交下一個。
 9. **還有時間** → D 找瓶頸，回到第 4 步疊下一層。
+10. **停損**：同一招 30 分鐘還沒通過對拍 → 退回上一個 `vN_ok.c`，換下一招或先做別題。DMA / PIO / 雙核這類硬體招最容易卡，演算法和迴圈內的招先做。
 
 ## 出事了怎麼辦
 
@@ -136,7 +155,7 @@
 
 ## 開考前五分鐘檢查
 
-- [ ] 這套檔案都打得開，連結會跳（放在同一個 Gist 或資料夾）
+- [ ] 這套檔案都打得開，連結會跳
 - [ ] 知道考場小模型的對話框在哪、能不能設 system prompt（能的話 A 放那裡）
 - [ ] 知道怎麼提交、提交後去哪看結果
-- [ ] 試一次：貼 A，問它「RP2350 的 DMA count 單位是什麼？」，它應該回答「傳輸筆數」
+- [ ] 上面「環境偵察」表格的五項都記下來了

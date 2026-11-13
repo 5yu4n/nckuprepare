@@ -4,7 +4,7 @@
 
 ## 考試當天：照這個順序開
 
-1. **[00-START.md](00-START.md)**：流程、時間表、出事怎麼辦、每段 prompt 多少 token。
+1. **[00-START.md](00-START.md)**：開考後第一個 10 分鐘的環境偵察（架構、SDK 版本、工具、小模型測試），再來是流程、時間表、出事怎麼辦、每段 prompt 多少 token。
 2. 看完題目 → **[solutions.md](solutions.md)** 開頭的「題目長這樣 → 跳到哪」，找 S 編號。
 3. 叫小模型做事 → **[prompts.md](prompts.md)**：先貼 A（通用），再貼對應的 B。
 4. 編譯 / 燒錄 / 當機 → **[build-and-debug.md](build-and-debug.md)**。
