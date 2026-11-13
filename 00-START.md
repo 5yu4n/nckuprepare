@@ -8,10 +8,11 @@
 | 檔案 | 一句話 | 什麼時候開 |
 |---|---|---|
 | **00-START.md**（這份） | 流程、出事怎麼辦、每段貼給小模型要多少 token | 一開始、卡住時 |
+| [templates/](templates/README.md) | **可直接複製的專案骨架**：對拍 + 計時的 `main.c`、定點數、雙核、DMA、PIO 串流、佇列、pthread（都測過） | 寫第一行程式之前 |
 | [solutions.md](solutions.md) | 18 種預測題型的完整優化解答；開頭有「題目長這樣 → 跳到哪」 | 看完題目第一個開 |
 | [prompts.md](prompts.md) | 貼給小模型的 prompt：A 通用、B1–B17 針對性、C–H 除錯與修正 | 要叫小模型做事時 |
 | [algorithms.md](algorithms.md) | 數論、圖論、資料結構、DP、字串範本；開頭有對照表 | 題目像數學或圖論時 |
-| [methodology.md](methodology.md) | 優化方法論：量 → 判斷瓶頸 → 由上往下試 → 比對 → 再量 | 小模型靠不住、要自己硬解時 |
+| [methodology.md](methodology.md) | **0.5 節決策程序**：照順序答 10 個是非題，每個「是」對應一個範本；後面是量測、瓶頸判斷、技巧排名 | 不知道下一步做什麼時 |
 | [build-and-debug.md](build-and-debug.md) | CMake 範本、建置、燒錄、`bench.h` 計時對拍、當機診斷 | 編譯、燒錄、當機時 |
 | [rp2350-riscv.md](rp2350-riscv.md) | Hazard3 冷門知識：架構判斷、可用指令、行內組語、從 Arm 搬過來的坑 | 位元運算、組語、浮點、計週期 |
 | [cheatsheet.md](cheatsheet.md) | 所有查證過的 API 名稱與用法（DMA、PIO、多核、鎖、ROS 2） | 不確定某個函式存不存在時 |
@@ -50,7 +51,8 @@
 ### 一題的標準動作（每題重複）
 
 1. **讀**：題目 + 給的文件。文件段落看不懂 → [prompts.md](prompts.md) H3 轉成表。給的程式看不懂 → H2 五行說明。
-2. **分類**：[solutions.md](solutions.md) 速查表找 S 編號；數學或圖論 → [algorithms.md](algorithms.md) 第 1 節。
+2. **分類**：[methodology.md](methodology.md) 0.5 節的是非題，或 [solutions.md](solutions.md) 速查表找 S 編號；數學或圖論 → [algorithms.md](algorithms.md) 第 1 節。
+   **先拿正確**：複製 [templates/](templates/README.md)，原版貼進 `work_ref`，看到 `ALL PASS` 就存 `v0_ok.c` 交一次。
 3. **開新對話**，貼 A（通用 prompt）。
 4. **貼 B**：對應的 B 編號（見下面預算表），填好題目與程式。沒有對應的 → B0 + 完整解答那一節。
 5. **建置**：照 [build-and-debug.md](build-and-debug.md) 第 2 節。編譯錯誤 → C 或 H1。
@@ -141,6 +143,15 @@
 | 10.1 分類 prompt | 900 | 數學題先跑這個分類 |
 
 最大的小節是 3.17（64 位元質數判斷，約 1,000，還需要 3.7、3.10、3.16 的函式）。A + G + 一個小節 + 它需要的小節，最多約 3,500。
+
+### templates/（只貼要改的函式或要用的那個 .h）
+
+| 段落 | 約 token |
+|---|---|
+| `main.c` 裡的 `work_ref` + `work_fast` 兩個函式（範例大小） | 250 |
+| `fixed.h` | 1,570 |
+| `dual_core.h` / `dma_util.h` / `pio_stream.h` / `spsc_ring.h` | 590 / 680 / 580 / 510 |
+| `linux-app/par.h` | 620 |
 
 ### rp2350-riscv.md 與 build-and-debug.md
 

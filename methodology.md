@@ -1,7 +1,7 @@
 # 優化方法論：照著走就能硬解
 
 > 什麼都不記得、小模型也不可靠的時候，就照這份一步一步做。每一步都只問一個問題，答案決定下一步。
-> 相關檔案：[00-START.md](00-START.md)（考試當天入口）、[build-and-debug.md](build-and-debug.md)（計時、對拍、當機診斷）、[solutions.md](solutions.md)（18 種預測題型的完整解答）、[optimization.md](optimization.md)（各種技巧的細節與範例）、[cheatsheet.md](cheatsheet.md)（API 名稱）、[algorithms.md](algorithms.md)（數論、圖論）、[prompts.md](prompts.md)（貼給小模型）。
+> 相關檔案：[templates/](templates/README.md)（可直接複製的骨架）、[00-START.md](00-START.md)（考試當天入口）、[build-and-debug.md](build-and-debug.md)（計時、對拍、當機診斷）、[solutions.md](solutions.md)（18 種預測題型的完整解答）、[optimization.md](optimization.md)（各種技巧的細節與範例）、[cheatsheet.md](cheatsheet.md)（API 名稱）、[algorithms.md](algorithms.md)（數論、圖論）、[prompts.md](prompts.md)（貼給小模型）。
 > 標「實測」的數字是我在 4 核 Linux VM 上量的；沒標的是通則，用之前自己量。
 
 ## 0. 一頁版（先看這個）
@@ -19,7 +19,69 @@
 10. 交之前：關掉除錯輸出、確認編譯等級、確認只交一次（OJ 規則不能同時多次提交）。
 ```
 
+**不知道下一步做什麼 → 照下面 0.5 節的決策程序答問題。**
+
 **要輾壓，不要只贏一點**：每一層都疊上去，總加速是相乘的。演算法換掉（常是 100 倍以上）→ 資料循序、零複製 → 熱函式放 RAM、`-O3` → 搬運交給 DMA、轉換交給 PIO → 兩顆核心同時算，而且和 DMA/PIO 重疊。先做結構性重寫（把「搬 → 變換 → 算」改成管線），再摳單一迴圈。每題的疊加配方和實測總加速在 [solutions.md](solutions.md) 的「輾壓原則」；最完整的範本是 S17（DMA + PIO + 雙核）與 S18（演算法層實測：數對計數 338 ms → 0.15 ms）。
+
+---
+
+## 0.5 決策程序：每題照著答這些問題
+
+腦袋卡住時不要想，照順序答。每個「是」都對應一個現成的範本，**能複製的就複製，不要叫小模型從零寫**。
+
+### 第 1 步：讀題（5 分鐘），在紙上填 5 格
+
+| 格子 | 填什麼 |
+|---|---|
+| n | 輸入最大多少（決定要哪個複雜度，見第 1 節表） |
+| 評分 | 看總時間？最慢一筆？只看正確？能不能超頻、用第二顆核心、改 CMake？ |
+| 在哪跑 | 板子（pico-sdk）／ Linux ／ ROS 2 |
+| 熱點 | 原版程式裡最深的那個迴圈在做什麼（搬資料？算？等？） |
+| 文件給的特殊東西 | 題目文件裡的 API、暫存器、硬體區塊（文件優先於筆記） |
+
+### 第 2 步：先拿到「正確」（20 分鐘內）
+
+1. 複製 [templates/](templates/) 的 `pico-app/` 或 `linux-app/`。
+2. 原版函式貼進 `work_ref`；`work_fast` 先**照抄原版**。
+3. 照題目改 `make_input`，建置，看到 `ALL PASS` → 存 `v0_ok.c` → 交一次保底。
+
+### 第 3 步：選招（由上往下問，第一個「是」就做那招）
+
+| # | 問題 | 是 → 做這招 | 範本 / 解答 / prompt | 一般收益 | 時限 |
+|---|---|---|---|---|---|
+| 1 | 原版的複雜度比第 1 節表格要求的高？（兩層迴圈但 n ≥ 10⁴、重複算區間、找配對） | 換演算法 | [algorithms.md](algorithms.md) 第 1 節對照表；S18；B17 / G | 10–1000 倍 | 40 分 |
+| 2 | 熱點在等硬體？（`*_blocking` 一筆一筆、`while (busy)`、`memcpy` / 複製迴圈） | DMA 搬、DMA → PIO → DMA 管線 | `dma_util.h`、`pio_stream.h`；S01–S03；B1–B3 | CPU 空出來，常 2–5 倍 | 40 分 |
+| 3 | 熱點裡有 `printf`、`float` / `double`（RISC-V）、變數除法 / 取模？ | 拿掉輸出；改定點；除同一個數改乘倒數；2 的次方改移位 | `fixed.h`；optimization.md；S10 | 2–20 倍 | 20 分 |
+| 4 | 熱點逐一處理位元（數 1、找最高位、反轉、奇偶）？ | `__builtin_popcount / clz / ctz / bswap32`、`rv_tools.h` | S09；B9 | 5–30 倍 | 15 分 |
+| 5 | 熱點每次都重算同樣的東西、輸入值域小（≤ 64K 種）？ | 開機建表、查表 | S10；B10 | 2–10 倍 | 20 分 |
+| 6 | 存取跳來跳去？（2D 陣列內層跑列、結構陣列只用一個欄位） | 改迴圈順序、分塊、SoA | S15；B14 | 2–5 倍 | 15 分 |
+| 7 | 元素彼此獨立、可以切段？ | 兩核（板子）／多執行緒（Linux），各自累加最後合併 | `dual_core.h`、`par.h`；S06、S13；B6、B13 | 約 2 倍（板子）／約核心數（Linux） | 30 分 |
+| 8 | 兩邊在搶鎖、每筆都上鎖、生產者消費者？ | 鎖只包一行、各自累加、atomic、SPSC 佇列 | `spsc_ring.h`；S07、S08、S14；B7、B8 | 2–100 倍 | 30 分 |
+| 9 | 板子：熱函式在 flash、兩核同時跑？ | `__not_in_flash_func`、`copy_to_ram` | build-and-debug 第 1 節 | 10–50% | 10 分 |
+| 10 | 規則允許超頻？ | `vreg_set_voltage` + `set_sys_clock_khz`，PIO / UART 重設 | optimization.md 第 6 節 | 時脈比例 | 10 分 |
+
+「一般收益」是筆記裡的實測或估計的大概值，實際以你的 `BENCH` 為準。
+
+做完一招回到第 3 步重新問（上一招改掉了熱點，下一個熱點可能不一樣）。**時限到了還沒 `ALL PASS` → 退回上一個 `vN_ok.c`，往下一列。**
+
+### 第 4 步：每一招的固定循環
+
+`改 work_fast` → 建置 → `ALL PASS`？（否 → 修或退回）→ 看 `BENCH` 有沒有變快（否 → 退回）→ 存 `vN_ok.c` → 交 → 回第 3 步。
+
+### 第 5 步：什麼給小模型做、什麼自己做
+
+| 給小模型（貼 A + B，只貼一個函式） | 自己做（從筆記複製） |
+|---|---|
+| 把一個函式改寫成無分支、展開、換 builtin | DMA / PIO / 雙核的設定程式：直接用 `templates/` 的模組，不要叫模型寫 |
+| 解釋看不懂的文件段落（H3）、看不懂的原版程式（H2） | API 名稱：一律以 [cheatsheet.md](cheatsheet.md) 為準 |
+| 編譯錯誤的第一行（C、H1） | 測資邊界、對拍：`main.c` 已經寫好 |
+| 想演算法：先給它 n 和要做什麼，叫它說複雜度（G） | 決定要不要交：只看 `ALL PASS` 和 `BENCH` 數字 |
+
+模型回答裡出現你沒看過的函式名稱 → `Ctrl+F` 查 cheatsheet.md，查不到就不用。
+
+### 第 6 步：收尾（最後 30 分鐘）
+
+不做新招。確認每題最後交的是 `ALL PASS` 而且最快的那版，除錯輸出都關了。
 
 ---
 

@@ -5,9 +5,10 @@
 ## 考試當天：照這個順序開
 
 1. **[00-START.md](00-START.md)**：開考後第一個 10 分鐘的環境偵察（架構、SDK 版本、工具、小模型測試），再來是流程、時間表、出事怎麼辦、每段 prompt 多少 token。
-2. 看完題目 → **[solutions.md](solutions.md)** 開頭的「題目長這樣 → 跳到哪」，找 S 編號。
-3. 叫小模型做事 → **[prompts.md](prompts.md)**：先貼 A（通用），再貼對應的 B。
-4. 編譯 / 燒錄 / 當機 → **[build-and-debug.md](build-and-debug.md)**。
+2. 寫程式前 → 複製 **[templates/](templates/README.md)**（對拍 + 計時骨架與常用模組，都測過），原版貼進 `work_ref`。
+3. 看完題目 → **[methodology.md](methodology.md) 0.5 節**的是非題選招，或 **[solutions.md](solutions.md)** 開頭的「題目長這樣 → 跳到哪」找 S 編號。
+4. 叫小模型做事 → **[prompts.md](prompts.md)**：先貼 A（通用），再貼對應的 B。
+5. 編譯 / 燒錄 / 當機 → **[build-and-debug.md](build-and-debug.md)**。
 
 ## 30 秒急救
 
@@ -18,6 +19,7 @@
 | 程式沒輸出、突然停 | RISC-V 例外會讓核心睡著 → [build-and-debug.md](build-and-debug.md) 6.1 |
 | 太慢 | [methodology.md](methodology.md) 第 0 節 → [prompts.md](prompts.md) D |
 | 小模型亂掰函式 | 開新對話重貼 A + B，名稱查 [cheatsheet.md](cheatsheet.md) |
+| 不知道下一招 | [methodology.md](methodology.md) 0.5 節決策程序 |
 | 完全卡住 | [methodology.md](methodology.md) 第 6 節「依序試這 20 件事」 |
 
 ## 檔案地圖
@@ -25,6 +27,7 @@
 | 檔案 | 內容 |
 |---|---|
 | [00-START.md](00-START.md) | 考試當天入口：流程、出事怎麼辦、貼上預算表 |
+| [templates/](templates/README.md) | 可直接複製的專案骨架與模組（pico-sdk 與 Linux），附測試 |
 | [solutions.md](solutions.md) | 18 種預測題型（S01–S18）的完整優化解答 |
 | [prompts.md](prompts.md) | 貼給小模型的 prompt：A 通用、A-mini、B0–B17 針對性、C–H 除錯與修正 |
 | [algorithms.md](algorithms.md) | 數論、圖論、資料結構、DP、字串範本，含在 RV32 上的加速倍數 |

@@ -1,0 +1,35 @@
+; xform.pio（S03）：DMA → PIO → DMA 管線用的變換程式。pioasm 組譯過。
+; CMakeLists.txt 打開 pico_generate_pio_header 那行，main.c #include "xform.pio.h"、"pio_stream.h"。
+.program xform_invert
+; 每個 word 位元反相：3 指令/word
+.wrap_target
+    pull block
+    mov isr, ~osr
+    push block
+.wrap
+
+.program xform_bitrev
+; 每個 word 位元反轉（bit 0 ↔ bit 31）
+.wrap_target
+    pull block
+    mov isr, ::osr
+    push block
+.wrap
+
+.program xform_echo
+; 原樣送回，autopull + autopush 只要 2 指令/word：out 32 → in 32
+.wrap_target
+    out x, 32
+    in x, 32
+.wrap
+
+% c-sdk {
+// 共用初始化：autopull/autopush 門檻 32，兩個 FIFO 都不 join
+static inline void xform_init(PIO pio, uint sm, uint off, pio_sm_config c) {
+    sm_config_set_out_shift(&c, true, true, 32);   // 右移、autopull、32
+    sm_config_set_in_shift(&c, false, true, 32);   // 左移、autopush、32（32 位元整個進出，方向不影響）
+    sm_config_set_clkdiv(&c, 1.0f);
+    pio_sm_init(pio, sm, off, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}
