@@ -60,3 +60,10 @@
 - **修正錯誤**：cheatsheet.md 3.5 的 `putget_demo` 讓 CPU 在 `.fifo putget` 模式讀寫 `rxf_putget`，但 SDK 寫明 putget 模式 CPU 無法存取；改成 `txput`（CPU 讀）與 `txget`（CPU 寫）兩支。另把 `rxfifo[0-7]` 改成 0–3（只有 4 格）。
 - `pull noblock` 在 TX FIFO 空時把 X 複製進 OSR：pico-examples `pwm.pio` 註解確認。
 - 仍未查證（datasheet 兩個網址都被網路代理擋）：PIO `mov` 到 ISR/OSR 的移位計數細節、Hazard3 在 RP2350 的乘除法週期、M33 `udiv` 週期、最高額定時脈、Zbc。
+
+## 5. 第三輪（11-14 凌晨）：重新編譯全部範例 + templates/
+
+- 這次裝了 riscv64-unknown-elf-gcc 13（picolibc）與 arm-none-eabi-gcc 13（newlib），用 pico-sdk 2.3.1 標頭只編譯不連結。
+- 各檔 42 個 C 區塊：41 個在 RISC-V 與 Arm 都 0 錯誤（純 Linux 的用 host gcc）；1 個是片段（rp2350-riscv.md 的 `flash_do_cmd` 三行，不是完整程式）。
+- 5 個要 `.pio.h` 的區塊：pioasm 不能在這台機器建，改用從 `.pio` 原始碼自動產生的「結構相同、指令填 0」的假標頭，確認 C 端（含 `% c-sdk` 區段）在兩種架構都能編。PIO 指令本身沒有重新組譯。
+- templates/：電腦上 `tests/run_all.sh` 全過（定點數對 libm 比對、SPSC 與 par.h 在 ThreadSanitizer 下無警告），板子端兩種架構 `-Wall -Wextra` 零警告。

@@ -7,7 +7,7 @@
 
 | 部分 | 大約長度 | 什麼時候貼 |
 |---|---|---|
-| A. 通用 prompt | 約 1,500 token（含 RISC-V 事實） | 每個新對話第一則（有 system prompt 欄位就放那裡） |
+| A. 通用 prompt | 約 1,550 token（含 RISC-V 事實） | 每個新對話第一則（有 system prompt 欄位就放那裡） |
 | B. 針對性 prompt（選一個） | 200–650 token | 第二則，填好題目與程式 |
 | 你的題目文字 + 程式 | 盡量 ≤ 2,500 token | 填進 B 的空格，只貼相關的函式 |
 | 留給模型回答 | 至少 2,000 token | — |
@@ -20,7 +20,7 @@
 
 ---
 
-## A. 通用 prompt（約 1,500 token，含 RISC-V 事實）
+## A. 通用 prompt（約 1,550 token，含 RISC-V 事實）
 
 先貼這一則。題目確定是 Arm 版時，可以刪掉最後的【RP2350 RISC-V 事實】那段，省約 600 token。
 
@@ -41,6 +41,7 @@ PIO：pio_add_program、pio_claim_unused_sm(pio, true)、pio_sm_init、pio_sm_se
 同步：spin_lock_claim_unused(true)、spin_lock_init(n)、save = spin_lock_blocking(lk)、spin_unlock(lk, save)、critical_section_enter_blocking / exit、atomic_fetch_add_explicit。
 雙核：multicore_launch_core1(fn)（只呼叫一次）、multicore_fifo_push_blocking(u32)、multicore_fifo_pop_blocking()。
 其他：time_us_64()、__not_in_flash_func(名稱)、__builtin_popcount / clz / ctz / bswap32。Linux：pthread_create / join、pthread_spin_lock，編譯加 -pthread。
+現成模組（我貼了才能用，直接呼叫，不要重寫）：dma_copy(dst, src, bytes)、dma_fill32(dst, v, words)、dual_run(work, ctx, n)、pio_stream_start / wait、q16_mul、isqrt32、fx_sin、ring_push / ring_pop、par_for(n, work, ctx)。
 
 【優化】能用的層全部疊上去，由上往下：
 1 演算法（n≤10⁶ 要 O(n log n)；雙層迴圈找配對 → 排序 + 雙指標或計數陣列；重複加總 → 前綴和）
