@@ -310,7 +310,7 @@ int main(void) {
 | `in` | `in <src>, <1-32>` | 從 src 移入 ISR。src：`pins` `x` `y` `null` `isr` `osr` |
 | `out` | `out <dst>, <1-32>` | 從 OSR 移出到 dst。dst：`pins` `x` `y` `null` `pindirs` `pc` `isr` `exec` |
 | `push` | `push [iffull] [block\|noblock]` | ISR → RX FIFO 並清空 ISR；預設 `block`（RX 滿就停） |
-| `pull` | `pull [ifempty] [block\|noblock]` | TX FIFO → OSR；預設 `block`；`noblock` 且 FIFO 空時 OSR ← X |
+| `pull` | `pull [ifempty] [block\|noblock]` | TX FIFO → OSR；預設 `block`；`noblock` 且 FIFO 空時 OSR ← X（pico-examples `pio/pwm/pwm.pio` 註解確認） |
 | `mov` | `mov <dst>, [op]<src>` | dst：`pins` `x` `y` `exec` `pc` `isr` `osr`；src：`pins` `x` `y` `null` `status` `isr` `osr`；op：`!` 或 `~`（反相）、`::`（位元反轉） |
 | `irq` | `irq [set\|nowait\|wait\|clear] <0-7> [rel]` | 設/清 PIO 內部 IRQ 旗標；`wait` 會等到旗標被清掉 |
 | `set` | `set <dst>, <0-31>` | dst：`pins` `x` `y` `pindirs`（最多 5 個 set 腳位） |
@@ -321,12 +321,12 @@ int main(void) {
 | 新語法 | 說明 |
 |---|---|
 | `mov pindirs, <src>` | mov 可寫腳位方向 |
-| `mov rxfifo[y], isr` / `mov rxfifo[0-7], isr` | 把 ISR 寫進 RX FIFO 指定格；**來源只能是 isr**，需 `.fifo txput` 或 `.fifo putget` |
-| `mov osr, rxfifo[y]` / `mov osr, rxfifo[0-7]` | 從 RX FIFO 指定格讀；**目的只能是 osr**，需 `.fifo txget` 或 `.fifo putget` |
+| `mov rxfifo[y], isr` / `mov rxfifo[0-3], isr` | 把 ISR 寫進 RX FIFO 指定格；**來源只能是 isr**，需 `.fifo txput` 或 `.fifo putget`。只有 4 格（`rxf_putget[4][4]`），用 0–3；pioasm 雖收 0–7，4–7 的行為未查證 |
+| `mov osr, rxfifo[y]` / `mov osr, rxfifo[0-3]` | 從 RX FIFO 指定格讀；**目的只能是 osr**，需 `.fifo txget` 或 `.fifo putget` |
 | `irq prev <n>` / `irq next <n>`、`wait 1 irq prev <n>` / `wait 1 irq next <n>` | 跨 PIO 區塊的 IRQ（不能加 `rel`） |
 | `wait <0/1> jmppin` / `wait <0/1> jmppin + <n>` | 等 jmp pin（或其後第 n 腳） |
 | `.mov_status irq [prev\|next] set <n>` | `mov x, status` 的來源可選 IRQ 旗標 |
-| CPU 端 | `pio->rxf_putget[sm][i]` 直接讀寫那 4 格（`.fifo putget` 時 CPU 不能用一般 FIFO 讀） |
+| CPU 端 | `pio->rxf_putget[sm][0..3]` 直接讀寫那 4 格，**只在** `.fifo txput`（SM 寫、CPU 讀）或 `.fifo txget`（CPU 寫、SM 讀）時可用；`.fifo putget` 時 CPU 完全碰不到（SDK `regs/pio.h` 說明：PUT xor GET 才開放） |
 
 ### 3.3 指示詞（directives）
 
@@ -488,20 +488,25 @@ skip:
 .wrap
 ```
 
-**RP2350 新指令示範**
+**RP2350 新指令示範**（依 SDK 2.3.1 pioasm 原始碼與 `pio.h` 修正：`putget` 模式 CPU 完全碰不到那 4 格，所以 CPU 要讀就用 `txput`、要寫就用 `txget`；修正後這版沒重新組譯）
 ```pio
-.pio_version 1          ; RP2350 才有的指令要宣告版本 1
-.program putget_demo
-.fifo putget            ; RX FIFO 變成 4 個可隨機存取的暫存器（CPU 不能用 FIFO 方式讀）
+.pio_version 1          ; 放在第一個 .program 前，後面每個程式都算版本 1
+.program put_demo
+.fifo txput             ; RX FIFO 變 4 格：SM 用 mov rxfifo[] 寫、CPU 讀 rxf_putget（不能再用一般 RX FIFO 讀）
     pull block
     mov isr, osr
-    mov rxfifo[0], isr  ; 寫入 rxf_putget[sm][0]，CPU 可直接讀
-    mov osr, rxfifo[1]  ; 從 rxf_putget[sm][1] 讀（CPU 先寫好）
+    mov rxfifo[0], isr  ; CPU 讀 pio->rxf_putget[sm][0]
+
+.program get_demo
+.fifo txget             ; RX FIFO 變 4 格：CPU 寫 rxf_putget、SM 用 mov osr, rxfifo[] 讀
+    pull block          ; 等 CPU 說「寫好了」
+    mov osr, rxfifo[1]  ; 讀 CPU 先寫進 rxf_putget[sm][1] 的值
+    mov x, osr
     irq next 0          ; 觸發「下一個」PIO block 的 IRQ 0
     wait 1 jmppin       ; 等 JMP pin 為 1
 ```
 
-**C 端使用（已語法檢查）**
+**C 端使用（已語法檢查；最後 `txput`/`txget` 那段是 11-13 晚上修正的，沒重新編譯）**
 ```c
 #include <stdio.h>
 #include "pico/stdlib.h"
@@ -532,14 +537,21 @@ int main(void) {
     pio_sm_unclaim(pio, sm);
     pio_remove_program(pio, &popcount_program, off);
 
-    // RP2350：.fifo putget 後 CPU 直接讀寫 rxf_putget
-    uint off2 = pio_add_program(pio2, &putget_demo_program);
-    pio_sm_config c2 = putget_demo_program_get_default_config(off2);
-    pio_sm_init(pio2, 0, off2, &c2);
-    pio2->rxf_putget[0][1] = 0x1234;           // 給 PIO 讀
+    // RP2350：.fifo txput → CPU 讀 rxf_putget；.fifo txget → CPU 寫 rxf_putget
+    uint offp = pio_add_program(pio2, &put_demo_program);
+    pio_sm_config cp = put_demo_program_get_default_config(offp);   // 已含 sm_config_set_fifo_join(TXPUT)
+    pio_sm_init(pio2, 0, offp, &cp);
     pio_sm_set_enabled(pio2, 0, true);
     pio_sm_put_blocking(pio2, 0, 42);
-    printf("%lu\n", (unsigned long)pio2->rxf_putget[0][0]);   // PIO 寫進來的值
+    sleep_us(10);                                // 等 SM 跑完那三條指令
+    printf("%lu\n", (unsigned long)pio2->rxf_putget[0][0]);   // 42
+
+    uint offg = pio_add_program(pio2, &get_demo_program);
+    pio_sm_config cg = get_demo_program_get_default_config(offg);   // 已含 sm_config_set_fifo_join(TXGET)
+    pio_sm_init(pio2, 1, offg, &cg);
+    pio2->rxf_putget[1][1] = 0x1234;             // 給 SM1 讀
+    pio_sm_set_enabled(pio2, 1, true);
+    pio_sm_put_blocking(pio2, 1, 0);             // 叫 SM1 去讀
     return 0;
 }
 ```
@@ -1176,6 +1188,6 @@ ament_cmake 的 CMakeLists 主要幾行：`find_package(ament_cmake REQUIRED)`�
 
 ### 未查證 / 限制
 
-- RP2350 datasheet PDF 這次抓不到，PIO 指令細節以 SDK 的 pioasm 原始碼與 RP2040 時代的既有行為為準；`pull noblock` 空時載入 X、`mov` 到 ISR/OSR 會重設移位計數等細節，考前若有時間對一下 datasheet PIO 章節。
+- RP2350 datasheet PDF 這次抓不到，PIO 指令細節以 SDK 的 pioasm 原始碼與 RP2040 時代的既有行為為準；`mov` 到 ISR/OSR 會不會重設移位計數等細節（`pull noblock` 空時載入 X 已由 pico-examples 確認），考前若有時間對一下 datasheet PIO 章節。
 - rclcpp 範本與 colcon / ament_cmake 寫法只對照名稱，沒有實際編譯。
 - 硬體行為（時序、實際效能數字）都沒有在開發板上跑過。

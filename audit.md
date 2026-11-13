@@ -57,4 +57,6 @@
 - `irq_set_priority` 在 RISC-V：語意同 Arm，只取高 4 位（16 級），會巢狀搶佔。已寫進 rp2350-riscv.md。
 - **修正錯誤**：optimization.md 原寫「XIP 快取停用時可當 RAM」是 RP2040 行為；RP2350 沒有 cache-as-SRAM 視窗，只能釘住快取行。
 - `std::hardware_destructive_interference_size`：g++ 13 可、clang 18 不行；`objdump --disassemble=` 在 binutils 2.42 可用。
-- 仍未查證（datasheet 兩個網址都被網路代理擋）：PIO `pull noblock` / `mov` 移位計數細節、Hazard3 在 RP2350 的乘除法週期、M33 `udiv` 週期、最高額定時脈、Zbc。
+- **修正錯誤**：cheatsheet.md 3.5 的 `putget_demo` 讓 CPU 在 `.fifo putget` 模式讀寫 `rxf_putget`，但 SDK 寫明 putget 模式 CPU 無法存取；改成 `txput`（CPU 讀）與 `txget`（CPU 寫）兩支。另把 `rxfifo[0-7]` 改成 0–3（只有 4 格）。
+- `pull noblock` 在 TX FIFO 空時把 X 複製進 OSR：pico-examples `pwm.pio` 註解確認。
+- 仍未查證（datasheet 兩個網址都被網路代理擋）：PIO `mov` 到 ISR/OSR 的移位計數細節、Hazard3 在 RP2350 的乘除法週期、M33 `udiv` 週期、最高額定時脈、Zbc。
