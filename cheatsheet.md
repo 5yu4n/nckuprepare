@@ -717,7 +717,7 @@ int main(void) {
 | 減少鎖 | 鎖外運算、每核心各自累加最後再合併 | |
 | 位元技巧 | 用移位/遮罩取代除法與取餘（2 的冪）；`__builtin_popcount/clz/ctz` 在 RP2350 RISC-V 直接變成單一指令 | |
 | 插值器 | `hardware/interp.h`：查表位址、混合運算 | 每核心一組 `interp0`/`interp1` |
-| 提高時脈 | `set_sys_clock_khz(khz, true)` | 先確認考題允許 |
+| 提高時脈 | `set_sys_clock_khz(khz, true)` | 先確認考題允許；先 `vreg_set_voltage`；之後 UART 重新 init、PIO 分頻重算（見 optimization.md 第 6 節） |
 | 不要 printf 在熱迴圈 | USB/UART 很慢 | |
 
 ### 5.2 計時範本（已語法檢查）

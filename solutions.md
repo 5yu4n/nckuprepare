@@ -72,7 +72,7 @@
 - **零複製**：處理直接在 DMA 寫入的陣列上做，不要再 `memcpy` 一份。
 - **搬 + 校驗一次完成**：DMA 複製時開 sniffer（[S05](#s05)），複製完 checksum 也好了。
 - **多個 PIO 狀態機平行**：同一支程式載一次（`pio_add_program`），`pio_sm_init` 到 2–4 個 SM，資料切成幾份、每份一對 DMA 通道（共 16 個通道夠用）。
-- **超頻**：`set_sys_clock_khz(khz, true)`（`hardware/clocks.h`，已查證存在）。只有題目沒禁止、而且是量整體時間時才考慮；超過額定 150 MHz 的穩定性、需不需要 `vreg_set_voltage`、UART 鮑率會不會跟著變都**未查證**，一定要先在板子上測輸出正確。
+- **超頻**：`set_sys_clock_khz(khz, true)`（`hardware/clocks.h`，已查證存在）。只有題目沒禁止、而且是量整體時間時才考慮；SDK 原始碼確認：`set_sys_clock_khz` 不會自己升電壓（要先 `vreg_set_voltage`）、`clk_peri` 會改成 48 MHz（UART 要重新 init）、PIO 分頻要用新的 `clk_sys` 重算、`time_us_64` 不受影響。超過額定 150 MHz 的穩定性**未查證**，一定要先在板子上測輸出正確。
 
 ---
 
@@ -407,7 +407,7 @@ uint32_t crc32_dma(const uint8_t *p, size_t n) {
     channel_config_set_sniff_enable(&c, true);
     dma_sniffer_set_data_accumulator(0xFFFFFFFFu);
     dma_sniffer_set_output_reverse_enabled(true);     // 同 pico-examples dma/sniff_crc
-    dma_sniffer_set_output_invert_enabled(true);      // 最後取反 = 標準 CRC-32 的 ~c（未查證：上機先比對軟體版）
+    dma_sniffer_set_output_invert_enabled(true);      // 最後取反 = 標準 CRC-32 的 ~c（依 pico-examples 推導，上機仍先比對軟體版）
     dma_sniffer_enable(ch, DMA_SNIFF_CTRL_CALC_VALUE_CRC32R, true);
     dma_channel_configure(ch, &c, &sink, p, n, true);
     dma_channel_wait_for_finish_blocking(ch);
@@ -434,7 +434,7 @@ int main(void) {
 
 **加速**：x86 實測 4 MB：逐位元 36.6 ms → 查表 8.8 ms（約 4 倍；逐位元版已用無分支寫法，若是 `if` 版差距更大）。sniffer 在已經要搬資料時等於免費。
 
-**坑**：`dma_sniffer_set_output_invert_enabled(true)` 讓結果等於標準 CRC-32 是**推論（未查證）**——上機先印出三個值，`dma` 跟 `table` 不同就把 invert 拿掉、自己 `~` 一次。只要加總就用 `DMA_SNIFF_CTRL_CALC_VALUE_SUM`。
+**坑**：pico-examples `dma/sniff_crc` 用 `CRC32R` + 種子 `0xFFFFFFFF` + `output_reverse`，結果等於「反射 CRC-32、沒有最後取反」（它用附加 CRC 後餘數為 0 來檢查）。再開 `output_invert` 就是標準 CRC-32（zlib 值）。這是推導，沒上板；上機先印三個值，`dma` 跟 `table` 不同就把 invert 拿掉、自己 `~` 一次。只要加總就用 `DMA_SNIFF_CTRL_CALC_VALUE_SUM`。
 
 ---
 

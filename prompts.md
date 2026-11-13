@@ -262,7 +262,7 @@ uint32_t crc32_dma(const uint8_t *p, size_t n) {
     channel_config_set_sniff_enable(&c, true);
     dma_sniffer_set_data_accumulator(0xFFFFFFFFu);
     dma_sniffer_set_output_reverse_enabled(true);     // 同 pico-examples dma/sniff_crc
-    dma_sniffer_set_output_invert_enabled(true);      // 最後取反 = 標準 CRC-32 的 ~c（未查證：上機先比對軟體版）
+    dma_sniffer_set_output_invert_enabled(true);      // 最後取反 = 標準 CRC-32 的 ~c（依 pico-examples 推導，上機仍先比對軟體版）
     dma_sniffer_enable(ch, DMA_SNIFF_CTRL_CALC_VALUE_CRC32R, true);
     dma_channel_configure(ch, &c, &sink, p, n, true);
     dma_channel_wait_for_finish_blocking(ch);
@@ -273,7 +273,7 @@ uint32_t crc32_dma(const uint8_t *p, size_t n) {
 }
 // 簡單加總校驗：DMA_SNIFF_CTRL_CALC_VALUE_SUM，32 位元傳輸時一次加一個 word
 ```
-注意：DMA 版的 output_invert 是否等於標準 CRC-32 未查證，程式要同時印出查表版與 DMA 版比對。
+注意：DMA 版設定照 pico-examples（CRC32R、種子 0xFFFFFFFF、output_reverse）再加 output_invert，推導上等於標準 CRC-32，但沒上板；程式要同時印出查表版與 DMA 版比對。
 【題目】{貼題目，特別是多項式、初值、是否反射、最後是否取反}
 【原程式】{貼程式}
 ````

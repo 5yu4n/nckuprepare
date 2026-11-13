@@ -47,4 +47,14 @@
 - **「SDK 2.1.0 / 2.2.0 起才有」這類版本說法**：SDK 只抓了 2.3.1 單一版本，沒核對歷史。考場 SDK 版本不同時，以編譯結果為準。
 - **工具鏈**：GCC 13（例如 Debian 的 riscv64-unknown-elf-gcc）不認得 `-mcpu=hazard3-rp2350` 與 Zcmp，SDK 會退回第 3 組 `-march`（沒有 Zcb/Zcmp），程式照樣能跑、只是稍大。考場若用官方工具鏈不受影響。
 - 「RISC-V 沒有硬體除法器」（prompts.md、optimization.md 的提示）意思是沒有 SIO 除法器；`div` 指令本身有，約 18 週期。字面上有點容易誤解，但後面都寫了週期數，沒改。
-- `sleep_ms`/`time_us_64` 不受 `clk_sys` 影響、最高額定時脈：仍未查證（筆記已標）。
+- 最高額定時脈：仍未查證（只在 datasheet，下載被擋）。
+
+## 4. 第二輪查證（11-13 晚上，對 pico-sdk 2.3.1 與 pico-examples 原始碼）
+
+- `sleep_ms`/`time_us_64` 不受 `clk_sys` 影響：**已確認**（tick 由 `clk_ref` = 12 MHz XOSC 產生）。
+- `set_sys_clock_khz`：不會自己調電壓；`clk_peri` 會改接 48 MHz USB PLL；PIO/PWM 吃 `clk_sys`，超頻後分頻要重算。已寫進 optimization.md 第 6 節、solutions.md。
+- DMA sniffer 標準 CRC-32：pico-examples `sniff_crc` 證明 `CRC32R` + `output_reverse` = 沒有最後取反的反射 CRC-32，加 `output_invert` 即標準值（推導，未上板）。
+- `irq_set_priority` 在 RISC-V：語意同 Arm，只取高 4 位（16 級），會巢狀搶佔。已寫進 rp2350-riscv.md。
+- **修正錯誤**：optimization.md 原寫「XIP 快取停用時可當 RAM」是 RP2040 行為；RP2350 沒有 cache-as-SRAM 視窗，只能釘住快取行。
+- `std::hardware_destructive_interference_size`：g++ 13 可、clang 18 不行；`objdump --disassemble=` 在 binutils 2.42 可用。
+- 仍未查證（datasheet 兩個網址都被網路代理擋）：PIO `pull noblock` / `mov` 移位計數細節、Hazard3 在 RP2350 的乘除法週期、M33 `udiv` 週期、最高額定時脈、Zbc。

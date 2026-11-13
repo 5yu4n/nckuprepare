@@ -236,7 +236,7 @@ static inline uint32_t rv_first_zero_byte(uint32_t w) {
 | SysTick（`hardware/structs/systick.h`）、SCB、NVIC 暫存器 | Arm 專屬（結構定義在 `structs/systick.h`、`scb.h`、`m33.h`） | `mcycle`、`time_us_64()`；中斷一律用 SDK `irq_*` API |
 | `__wfe()` / `__sev()` | SDK 換成 `h3.block` / `h3.unblock` | 照用 SDK 函式即可 |
 | 關中斷 `save_and_disable_interrupts()` | SDK 在 RISC-V 改清 `mstatus.MIE`（第 3 位） | 照用 SDK 函式即可 |
-| 中斷優先權 `irq_set_priority` | Xh3irq 的優先權行為和 NVIC 是否完全相同 **未查證** | 避免依賴優先權 |
+| 中斷優先權 `irq_set_priority` | SDK 2.3.1 `irq.c`：語意和 Arm 一樣（`0x00` 最高、`0xff` 最低、預設 `0x80`），RISC-V 只取**高 4 位**（16 級，`0x80` 和 `0x8f` 一樣）；`crt0_riscv.S` 會開巢狀中斷，高優先權可搶佔 | 照用 SDK API；要分級就用 `0x00`/`0x40`/`0x80`/`0xc0` 這種高 4 位不同的值 |
 | `sdiv`/`udiv`（M33 有硬體除法） | `div`/`divu` 約 18 週期 | 同第 6 節第 4 條 |
 
 **不受架構影響的**：DMA、PIO、`multicore_*`、`spin_lock_*`、`critical_section_*`、`time_us_64()`、`__not_in_flash_func`，名稱與用法完全一樣。SDK 的 spin lock 在 RISC-V 用 `amoor`/`amoadd` 實作（見 [cheatsheet.md](cheatsheet.md)）。

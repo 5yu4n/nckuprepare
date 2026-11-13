@@ -103,7 +103,7 @@ uint32_t measure(void (*f)(void)) {
 | 區域 | 位址 | 大小 | 用途 |
 |---|---|---|---|
 | XIP（flash，經快取） | `0x10000000` `XIP_BASE` | 依 flash | 預設程式放這，cache miss 很慢 |
-| XIP 快取當 SRAM | `0x13ffc000`–`0x14000000` `XIP_SRAM_BASE` | 16 KB | 快取停用時可當 RAM（細節 未查證） |
+| XIP 快取當 SRAM | `0x13ffc000`–`0x14000000` `XIP_SRAM_BASE` | 16 KB | **和 RP2040 不同**：SDK 暫存器說明（`regs/xip.h` 的 `CTRL_EN_SECURE`）寫 RP2350「沒有 cache-as-SRAM 視窗」，要用就**快取保持開著、把個別快取行釘住**（`xip_cache_pin_range`）。考試別拿它當額外 RAM |
 | XIP 不經快取 | `0x14000000` `XIP_NOCACHE_NOALLOC_BASE` | | 讀一次就丟的資料 |
 | SRAM0–7（交錯） | `0x20000000` `SRAM_STRIPED_BASE` | 512 KB | 主記憶體，相鄰字分散到不同 bank |
 | SRAM4 起 | `0x20040000` `SRAM4_BASE` | | |
@@ -257,7 +257,7 @@ _Static_assert(sizeof(bad_t) == 12 && sizeof(good_t) == 8, "layout");
 |---|---|
 | SDK 自動產生 | `pico_add_extra_outputs(app)` → build 目錄有 `app.dis`（`objdump -h` 加 `-d`） |
 | 手動反組譯 | RISC-V：`riscv32-unknown-elf-objdump -d app.elf`（工具鏈前綴也可能是 `riscv32-pico-elf-`、`riscv32-corev-elf-`、`riscv-none-elf-`）；Arm：`arm-none-eabi-objdump -d app.elf` |
-| 只看一個函式 | `objdump -d app.elf --disassemble=函式名`（未查證：需 binutils 2.32 以上） |
+| 只看一個函式 | `objdump -d app.elf --disassemble=函式名`（binutils 2.42 實測可用；舊版不認得就整份 `-d` 後搜尋 `<函式名>:`） |
 | 直接看編譯輸出 | `gcc -O2 -S -o - file.c`（要帶跟專案一樣的 `-march`） |
 | 檢查有沒有用到 Zb* | 在 `.dis` 搜 `cpop`、`ctz`、`clz`、`min`、`max`、`sh1add/sh2add/sh3add`、`rev8`、`brev8`、`andn`、`bset/bclr/binv/bext` |
 
@@ -701,9 +701,11 @@ bool overclock(uint32_t khz) {
 | `vreg_disable_voltage_limit()` | 解除 1.30 V 上限（危險，考試不要） |
 | `clock_get_hz(clk_sys)`、`clock_get_hz(clk_peri)` | 確認實際頻率 |
 
-- **周邊時脈**：開機時 `clk_peri` 接 `clk_sys`。改 PLL 後 `clk_peri` 是否跟著變由 `PICO_CLOCK_ADJUST_PERI_CLOCK_WITH_SYS_CLOCK` 決定（預設 0）。改時脈後重新 `stdio_init_all()` / `uart_init`，用 `clock_get_hz(clk_peri)` 確認，UART 鮑率才不會跑掉。
-- 官方保證的最高時脈、各電壓對應的安全頻率：**未查證**。考試計時題先確認規則允不允許超頻。
-- `sleep_ms`、`time_us_64` 走 timer，不受 `clk_sys` 影響（未查證：依 SDK 預設 tick 來源設定）。
+- **周邊時脈（已對 SDK 2.3.1 `clocks.c`）**：開機時 `clk_peri` 接 `clk_sys`（150 MHz）。`set_sys_clock_khz` → `set_sys_clock_pll` 會把 `clk_peri` 改接 **48 MHz 的 USB PLL**（`PICO_CLOCK_ADJUST_PERI_CLOCK_WITH_SYS_CLOCK` 預設 0）。所以 `clk_peri` 一定會變，UART / SPI 要重新 `stdio_init_all()` / `uart_init`，用 `clock_get_hz(clk_peri)` 確認。
+- **PIO、PWM 吃的是 `clk_sys`**：超頻後 PIO 的 `sm_config_set_clkdiv` 與 PWM 分頻要用新的 `clock_get_hz(clk_sys)` 重算，不然 PIO 協定的速度會跟著變快。
+- **`sleep_ms`、`time_us_64` 不受影響（已對 SDK 原始碼）**：計時器的 tick 由 `clk_ref` 產生（`runtime_init_clocks.c` 的 `start_all_ticks`），`clk_ref` 一直接 12 MHz XOSC，`set_sys_clock_pll` 也把它設回 XOSC。
+- **`set_sys_clock_khz` 不會自己調電壓**：要先 `vreg_set_voltage`。PLL 的 VCO 範圍 750–1600 MHz（`pll.h`），做得到的例子：200000、240000、250000、300000 kHz；做不到時 `false` 版回傳 false。
+- 官方保證的最高時脈、各電壓對應的安全頻率：**未查證**（只在 datasheet）。考試計時題先確認規則允不允許超頻。
 
 ---
 
@@ -762,7 +764,7 @@ atomic : 0.400s total=8000000   ← 高度搶用時 atomic 不一定比 mutex �
 
 | 招式 | 重點 |
 |---|---|
-| 快取行填充 | `_Alignas(64)`（C11）/ `alignas(64)`（C++）；或 `std::hardware_destructive_interference_size`（C++17，未查證：GCC 12 起） |
+| 快取行填充 | `_Alignas(64)`（C11）/ `alignas(64)`（C++）；或 `std::hardware_destructive_interference_size`（`<new>`，C++17；實測 g++ 13 = 64，**clang 18 編譯失敗**，所以直接寫 `alignas(64)` 最保險） |
 | 區域累加後合併 | 共用變數最快的寫法是「不要共用」 |
 | atomic vs 鎖 | 單一計數器用 `atomic_fetch_add_explicit(..., memory_order_relaxed)`；保護多個欄位用 mutex |
 | spin vs mutex | 臨界區極短且執行緒數 ≤ 核心數才用 spin（`pthread_spin_lock`）；否則 mutex（會睡，不浪費 CPU） |
@@ -936,12 +938,9 @@ int main(int argc, char ** argv) {
 
 ## 10. 未查證清單
 
-- RP2350 datasheet 的數字：最高額定時脈、各電壓對應頻率、Cortex-M33 `udiv` 週期數、DCP 與 VFP 實際速度、XIP 快取當 SRAM 的使用條件、匯流排仲裁細節。
+- RP2350 datasheet 的數字：最高額定時脈、各電壓對應頻率、Cortex-M33 `udiv` 週期數、DCP 與 VFP 實際速度、匯流排仲裁細節。
 - Arm DWT `dwt_cyccnt` 在 RP2350 實機可用（暫存器存在於 SDK 標頭，沒上機測）。
 - LTO 支援（SDK cmake 裡找不到）。
-- `objdump --disassemble=函式名` 需要的 binutils 版本。
-- `std::hardware_destructive_interference_size` 的 GCC 支援版本。
 - rclcpp intra-process 支援的 QoS 組合；rclcpp 範例沒有實際編譯。
 - `rclpy.experimental.EventsExecutor` 是否在考場安裝的 Jazzy 版本裡。
-- 改 `clk_sys` 後 `sleep_ms` 是否完全不受影響。
 - Hazard3 週期數取自 Hazard3 repo（假設最高效能設定），RP2350 實際值以 datasheet 為準。
