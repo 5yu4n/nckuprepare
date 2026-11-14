@@ -23,7 +23,7 @@ target_compile_options(board_app PRIVATE -Wall -Wextra)
 
 target_link_libraries(board_app PRIVATE
     pico_stdlib hardware_pio hardware_pwm hardware_i2c hardware_spi
-    hardware_adc hardware_uart hardware_clocks)
+    hardware_adc hardware_uart hardware_clocks hardware_dma)
 
 # printf 同時走 USB（板上 USB1）與 UART0（板上 "UART 0" USB-C）
 pico_enable_stdio_usb(board_app 1)

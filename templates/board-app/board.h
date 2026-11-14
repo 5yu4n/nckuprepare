@@ -10,6 +10,7 @@
 #include "hardware/spi.h"
 #include "hardware/adc.h"
 #include "hardware/uart.h"
+#include "hardware/dma.h"
 #include "ws2812.pio.h"
 #include "quadrature_encoder.pio.h"
 
@@ -235,6 +236,38 @@ static inline void lcd_fill(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint
     for (uint32_t i = 0; i < (uint32_t)w * h; i++) spi_write_blocking(LCD_SPI, px, 2);
     gpio_put(PIN_LCD_CS, 1);
 }
+// ---- DMA 版：整塊填色 / 貼圖，CPU 不用一個一個像素送（大面積快好幾倍，CPU 可同時做別的）----
+// 做法：SPI 暫時切成 16 位元，DMA 以 SPI 的 TX DREQ 節拍把像素寫進 SPI 資料暫存器。
+static int lcd_dma_ch = -1;
+static inline void lcd_dma_send16(const uint16_t *src, uint32_t count, bool src_inc) {
+    if (lcd_dma_ch < 0) lcd_dma_ch = dma_claim_unused_channel(true);
+    spi_set_format(LCD_SPI, 16, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);    // 和 lcd_init 同模式
+    gpio_put(PIN_LCD_CS, 0); gpio_put(PIN_LCD_DC, 1);
+    dma_channel_config c = dma_channel_get_default_config(lcd_dma_ch);
+    channel_config_set_transfer_data_size(&c, DMA_SIZE_16);
+    channel_config_set_read_increment(&c, src_inc);
+    channel_config_set_write_increment(&c, false);
+    channel_config_set_dreq(&c, spi_get_dreq(LCD_SPI, true));
+    dma_channel_configure(lcd_dma_ch, &c, &spi_get_hw(LCD_SPI)->dr, src, count, true);
+    dma_channel_wait_for_finish_blocking(lcd_dma_ch);       // 要並行就把這行和下面收尾移到之後
+    while (spi_is_busy(LCD_SPI)) tight_loop_contents();     // 等最後一個像素真的送出去
+    while (spi_is_readable(LCD_SPI)) (void)spi_get_hw(LCD_SPI)->dr;
+    spi_get_hw(LCD_SPI)->icr = SPI_SSPICR_RORIC_BITS;       // 清 RX 溢位旗標（同 spi_write_blocking 收尾）
+    gpio_put(PIN_LCD_CS, 1);
+    spi_set_format(LCD_SPI, 8, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);     // 換回 8 位元給 lcd_cmd 用
+}
+static inline void lcd_fill_dma(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t rgb565) {
+    static uint16_t px;                                     // DMA 讀的位址要在傳完前都有效
+    px = rgb565;
+    lcd_window(x, y, x + w - 1, y + h - 1);
+    lcd_dma_send16(&px, (uint32_t)w * h, false);            // 讀位址不遞增：同一個顏色重複送
+}
+// buf 是 w*h 個 RGB565（原生 uint16_t，不用自己換位元組順序，SPI 16 位元模式會先送高位元組）
+static inline void lcd_blit_dma(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t *buf) {
+    lcd_window(x, y, x + w - 1, y + h - 1);
+    lcd_dma_send16(buf, (uint32_t)w * h, true);
+}
+
 #define RGB565(r, g, b) (uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3))
 
 // ======================= UART（UART0 連接器、無線模組）=======================
@@ -261,4 +294,31 @@ static inline float vbat_read(void) {
     adc_select_input(PIN_ADC_VBAT - ADC_BASE_PIN);          // RP2350B: ADC_BASE_PIN = 40
     uint16_t raw = adc_read();                               // 12-bit
     return raw * 3.3f / 4096.f * VBAT_DIVIDER;
+}
+
+// ======================= 非阻塞旋律（蜂鳴器）=======================
+// 主迴圈每圈呼叫 melody_poll()，不會卡住按鍵、馬達、LED。
+typedef struct { uint16_t hz, ms; } note_t;                 // hz = 0 是休止符
+static const note_t *mel; static int mel_n, mel_i; static absolute_time_t mel_next;
+static inline void melody_start(const note_t *notes, int n) {
+    mel = notes; mel_n = n; mel_i = 0; mel_next = get_absolute_time();
+}
+static inline void melody_poll(void) {
+    if (!mel || !time_reached(mel_next)) return;
+    if (mel_i >= mel_n) { buzzer_tone(0); mel = NULL; return; }
+    buzzer_tone(mel[mel_i].hz);
+    mel_next = make_timeout_time_ms(mel[mel_i].ms);
+    mel_i++;
+}
+
+// ======================= 檢查 PWM slice 衝突 =======================
+// 開機印一次：同一個 slice 的兩支腳頻率共用，伺服（50 Hz）和馬達（20 kHz）不能同 slice。
+static inline void pwm_print_slices(void) {
+    const struct { const char *name; uint pin; } p[] = {
+        { "BUZZER", PIN_BUZZER }, { "SERVO1", PIN_SERVO1 }, { "SERVO2", PIN_SERVO2 },
+        { "M1_IN1", PIN_M1_IN1 }, { "M1_IN2", PIN_M1_IN2 }, { "M2_IN1", PIN_M2_IN1 }, { "M2_IN2", PIN_M2_IN2 },
+        { "M3_IN1", PIN_M3_IN1 }, { "M3_IN2", PIN_M3_IN2 }, { "M4_IN1", PIN_M4_IN1 }, { "M4_IN2", PIN_M4_IN2 } };
+    for (unsigned i = 0; i < sizeof p / sizeof p[0]; i++)
+        printf("%-7s GPIO%-2u slice %u %c\n", p[i].name, p[i].pin, pwm_gpio_to_slice_num(p[i].pin),
+               pwm_gpio_to_channel(p[i].pin) ? 'B' : 'A');
 }

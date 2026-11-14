@@ -68,7 +68,11 @@ int main(void) {
     i2c_bus_init(i2c1, PIN_I2C1_SDA, PIN_I2C1_SCL, 400000);
     i2c_scan(i2c0); i2c_scan(i2c1);
     vbat_init();
-    buzzer_beep(2000, 100);
+    lcd_init();
+    lcd_fill_dma(0, 0, LCD_W, LCD_H, RGB565(0, 0, 64));
+    pwm_print_slices();
+    static const note_t hello[] = { { 523, 120 }, { 659, 120 }, { 784, 200 }, { 0, 50 } };
+    melody_start(hello, 4);
 
     int speed = 0, hue = 0;
     absolute_time_t next_print = make_timeout_time_ms(200);
@@ -86,6 +90,7 @@ int main(void) {
             leds_set(i, r / 4, g / 4, b / 4);
         }
         if (++hue >= 240) hue = 0;
+        melody_poll();
 
         if (time_reached(next_print)) {
             leds_show();

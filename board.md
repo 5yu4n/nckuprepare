@@ -100,6 +100,8 @@ void buzzer_tone(uint32_t f) {                 // f = 0 靜音
 ```
 **有源**（給電就響、音高固定）：`gpio_put(PIN_BUZZER, 1)`。分辨法：給 1 持續響就是有源；只「喀」一聲就是無源。
 
+不卡主迴圈的旋律：`melody_start(notes, n)` 一次，主迴圈每圈 `melody_poll()`（`board.h`，`note_t` 是 `{hz, ms}`，hz = 0 休止）。
+
 音符頻率（Hz）：C4 262、D4 294、E4 330、F4 349、G4 392、A4 440、B4 494、C5 523。
 
 ## 6. 按鍵（去彈跳、邊緣偵測）
@@ -195,7 +197,7 @@ void servo_init(uint pin) {
 }
 // 0°~180° ≈ 500~2500 us（多數伺服 1000~2000 us 比較安全）
 ```
-同一個 slice 的兩支腳不能一支當伺服（50 Hz）、一支當馬達（20 kHz）。
+同一個 slice 的兩支腳不能一支當伺服（50 Hz）、一支當馬達（20 kHz）。開機呼叫 `pwm_print_slices()` 會印出每支 PWM 腳的 slice，一眼看出有沒有撞到。
 
 ## 10. I2C（感測器、IMU、OLED）
 
@@ -229,7 +231,7 @@ gpio_set_function(PIN_LCD_SCK, GPIO_FUNC_SPI); gpio_set_function(PIN_LCD_MOSI, G
 - 顏色反相：`0x21`（INVON）改 `0x20`。
 - 畫面偏移（240×240 的 ST7789 用 240×320 控制器）：MADCTL 旋轉後 y 要加 80。
 - SPI 腳位規則：SCK 在 gpio%4==2、TX(MOSI) 在 %4==3、RX 在 %4==0、CSn 在 %4==1；每 8 支一組輪流 spi0/spi1（0–7 spi0、8–15 spi1、16–23 spi0、24–31 spi1、32–39 spi0、40–47 spi1）。
-- 很快的整塊填色可用 DMA（見 cheatsheet DMA 段），但先求能顯示。
+- **DMA 版**（`board.h`）：`lcd_fill_dma(x, y, w, h, color)` 填色、`lcd_blit_dma(x, y, w, h, buf)` 貼一塊 RGB565 圖。做法是 SPI 暫時切 16 位元、DMA 用 `spi_get_dreq(LCD_SPI, true)` 節拍寫 `&spi_get_hw(LCD_SPI)->dr`，填色時讀位址不遞增。傳完要等 `spi_is_busy` 變 false 再拉高 CS，再把 SPI 切回 8 位元。先用 `lcd_fill` 確認畫面正常，再換 DMA 版。
 
 ## 12. UART（UART0 連接器、無線模組）
 
@@ -263,7 +265,23 @@ float v = raw * 3.3f / 4096 * 分壓比;
 - 量時間：`time_us_64()`；兩次差值就是微秒。
 - `sleep_ms` 會讓整個 core 停下，主迴圈要同時顧按鍵、LED、馬達時改用 `absolute_time_t` + `time_reached()` 的非阻塞寫法（`main.c` 有示範）。
 
-## 15. 常見坑（這塊板）
+## 15. 在這塊板上「優化系統效能」先看哪裡
+
+題目若是「讓機器人反應更快 / 更新更順 / 控制更穩」，照這個順序查（每改一項都量 `time_us_64()` 前後差）：
+
+| 慢在哪 | 怎麼看出來 | 改法 |
+|---|---|---|
+| 主迴圈裡 `sleep_ms` | 按鍵反應慢、LED 卡頓 | `absolute_time_t` + `time_reached()` 非阻塞；固定週期工作改 `add_repeating_timer_ms` |
+| 主迴圈或中斷裡 `printf` | 一行 printf 在 USB/UART 上要幾百微秒 | 只在 200 ms 一次的地方印；中斷裡完全不印 |
+| LCD 一個像素一個 `spi_write_blocking` | 全螢幕填色要很久 | `lcd_fill_dma` / `lcd_blit_dma`；只重畫變動的區塊；SPI 時脈拉高（ST7789 多半 40–62.5 MHz 可） |
+| I2C 用 100 kHz、一次讀一個暫存器 | 讀 IMU 佔掉控制週期 | `i2c_init(..., 400000)`；連續暫存器一次 burst 讀（多數感測器位址會自動遞增） |
+| 編碼器用 GPIO 中斷 | 高轉速時 CPU 被中斷吃光、計數漏掉 | 改 PIO 版 `quadrature_encoder`（硬體計數，不吃 CPU） |
+| 控制迴圈用 float | RISC-V 核心沒有 FPU，float 是軟體算 | 定點整數（[templates/pico-app/fixed.h](templates/pico-app/fixed.h)）；Arm 核心有 FPU，float 可以 |
+| 一顆核心做所有事 | 計算重時控制週期不穩 | core0 控制（馬達、編碼器、按鍵），core1 計算或畫面；用 FIFO / `spsc_ring.h` 傳資料 |
+| WS2812 每圈都更新 | 6 顆約 0.2 ms，頻繁更新也浪費 | 有變才 `leds_show()`；量大時改 DMA 餵 PIO（見 cheatsheet DMA→PIO） |
+| 等 DMA 傳完才做下一件事 | CPU 閒著 | 啟動 DMA 後先做別的，最後才 `dma_channel_wait_for_finish_blocking` |
+
+## 16. 常見坑（這塊板）
 
 | 症狀 | 原因 |
 |---|---|
