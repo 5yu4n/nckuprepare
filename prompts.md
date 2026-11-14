@@ -612,7 +612,9 @@ encoders_init(); encoder_get(i);                          // i = 0..3，回傳 i
 servo_init(pin); servo_deg(pin, deg); servo_us(pin, us);  // pin 用 PIN_SERVO1 等
 i2c_bus_init(i2c0, PIN_I2C0_SDA, PIN_I2C0_SCL, 400000); i2c_scan(i2c0);
 i2c_reg_read(i2c0, addr, reg, buf, n); i2c_reg_write(i2c0, addr, reg, val);   // 回傳 < 0 表示失敗
-lcd_init(); lcd_fill(x, y, w, h, RGB565(r, g, b));
+lcd_init(); lcd_fill(x, y, w, h, RGB565(r, g, b)); lcd_fill_dma(同參數，DMA 快版); lcd_blit_dma(x, y, w, h, const uint16_t *buf);
+melody_start(notes, n); melody_poll();                    // 非阻塞旋律，note_t = {hz, ms}，主迴圈每圈呼叫 melody_poll
+pwm_print_slices();                                       // 印出每支 PWM 腳的 slice，檢查伺服和馬達有沒有撞
 uart_link_init(uart1, PIN_UART1_TX, PIN_UART1_RX, 115200); uart_read_line(u, buf, cap, &len);  // 非阻塞，整行回傳長度否則 -1
 vbat_init(); vbat_read();                                  // 回傳 float 伏特
 【規則】

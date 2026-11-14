@@ -67,3 +67,12 @@
 - 各檔 42 個 C 區塊：41 個在 RISC-V 與 Arm 都 0 錯誤（純 Linux 的用 host gcc）；1 個是片段（rp2350-riscv.md 的 `flash_do_cmd` 三行，不是完整程式）。
 - 5 個要 `.pio.h` 的區塊：pioasm 不能在這台機器建，改用從 `.pio` 原始碼自動產生的「結構相同、指令填 0」的假標頭，確認 C 端（含 `% c-sdk` 區段）在兩種架構都能編。PIO 指令本身沒有重新組譯。
 - templates/：電腦上 `tests/run_all.sh` 全過（定點數對 libm 比對、SPSC 與 par.h 在 ThreadSanitizer 下無警告），板子端兩種架構 `-Wall -Wextra` 零警告。
+
+## 2026-11-14 早上：考場板子（RP2350B）
+
+- `templates/board-app/`（`board.h`、`main.c`、`boards/exam_rp2350b.h`）：pico-sdk 2.3.1、`gcc-arm-none-eabi` 13 實際 cmake + make，三種 MODE 都產出 `.uf2`，`-Wall -Wextra` 無警告。RISC-V（`riscv64-unknown-elf-gcc` 13 + picolibc）`main.c` 編譯通過，連結因環境缺函式庫沒做。
+- `templates/pico-app/` 改用 `exam_rp2350b` 後重新建置，產出 `.uf2`。
+- `ws2812.pio`、`quadrature_encoder.pio` 直接取自 pico-examples（未修改）。
+- 用到的 SDK 名稱（`pio_claim_free_sm_and_add_program_for_gpio_range`、`UART_FUNCSEL_NUM`、`ADC_BASE_PIN`=40、`ADC_TEMPERATURE_CHANNEL_NUM`、`spi_get_dreq`、`i2c_*_timeout_us` 等）都編譯過。
+- **未驗證**：所有腳位（除 IO 排針印的 40–44）、LED 型號、蜂鳴器有源或無源、馬達驅動晶片真值表、無線模組型號、LCD 控制器型號與 SPI 模式；**沒有上板跑過**。
+- 刪除：ROS 2 全部內容（cheatsheet 7、8.2；optimization 8；solutions S12；prompts B12、E）。舊內容在 git `d06e802` 之前的版本。
