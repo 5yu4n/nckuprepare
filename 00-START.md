@@ -1,12 +1,16 @@
 # 00-START：考試當天從這裡開始
 
 > 2026-11-14（民國 115 年）成大資工特殊選才上機考。考點：讀文件掌握軟硬體架構、優化程式與整體系統效能；Online Judge 計分，**不能同時提交多次**；只能用考場提供的大語言模型；只能用考場電腦已安裝的軟體（不能自己裝 picotool 等工具）。以上依考試公告。
-> 晶片 RP2350，很可能跑 RISC-V（Hazard3）模式。
+> 板子：**RP2350B 機器人控制板**（照片確認）。周邊與腳位 → **[board.md](board.md)**；現成專案 → [templates/board-app/](templates/board-app/)。
+> 晶片 RP2350B（GPIO 0–47、ADC 在 40–47），Arm 或 RISC-V（Hazard3）都可能，開考先確認。
+
+**板子三件事先做**：①CMake 用 `exam_rp2350b`（或考場給的 board header），不要用 `pico2`，不然 GPIO 30–47 不能用 ②找腳位：先翻考場文件；沒有就燒 board-app 的 `-DMODE=1`（掃輸入）、`-DMODE=2`（掃 WS2812）③把腳位填進 `board_pins.h`，之後所有 prompt 都附上這個檔。
 
 ## 檔案地圖
 
 | 檔案 | 一句話 | 什麼時候開 |
 |---|---|---|
+| **[board.md](board.md)** | 考場板子：每個周邊（LED、蜂鳴器、按鍵、馬達、編碼器、伺服、I2C、LCD、UART、ADC）的寫法、找腳位、坑 | 題目碰到板上硬體時 |
 | **00-START.md**（這份） | 流程、出事怎麼辦、每段貼給小模型要多少 token | 一開始、卡住時 |
 | [templates/](templates/README.md) | **可直接複製的專案骨架**：對拍 + 計時的 `main.c`、定點數、雙核、DMA、PIO 串流、佇列、pthread（都測過） | 寫第一行程式之前 |
 | [solutions.md](solutions.md) | 18 種預測題型的完整優化解答；開頭有「題目長這樣 → 跳到哪」 | 看完題目第一個開 |
@@ -15,7 +19,7 @@
 | [methodology.md](methodology.md) | **0.5 節決策程序**：照順序答 10 個是非題，每個「是」對應一個範本；後面是量測、瓶頸判斷、技巧排名 | 不知道下一步做什麼時 |
 | [build-and-debug.md](build-and-debug.md) | CMake 範本、建置、燒錄、`bench.h` 計時對拍、當機診斷 | 編譯、燒錄、當機時 |
 | [rp2350-riscv.md](rp2350-riscv.md) | Hazard3 冷門知識：架構判斷、可用指令、行內組語、從 Arm 搬過來的坑 | 位元運算、組語、浮點、計週期 |
-| [cheatsheet.md](cheatsheet.md) | 所有查證過的 API 名稱與用法（DMA、PIO、多核、鎖、ROS 2） | 不確定某個函式存不存在時 |
+| [cheatsheet.md](cheatsheet.md) | 所有查證過的 API 名稱與用法（DMA、PIO、多核、鎖） | 不確定某個函式存不存在時 |
 | [optimization.md](optimization.md) | 各種優化技巧的細節、前後對照、實測數字 | 想知道某招為什麼有效時 |
 
 ## 開考後第一個 10 分鐘：環境偵察（每項都記在紙上）
@@ -26,6 +30,8 @@
 |---|---|---|
 | 架構：RISC-V 還是 Arm | `grep -e PICO_PLATFORM: -e PICO_BOARD: -e CMAKE_C_COMPILER: build/CMakeCache.txt`（`rp2350-riscv` 或 `rp2350-arm-s`）；或看編譯器名稱：`riscv32-*-elf-gcc` 是 RISC-V，`arm-none-eabi-gcc` 是 Arm | Arm 版：prompt A 刪掉【RP2350 RISC-V 事實】那段；`rp2350-riscv.md` 只在 RISC-V 用 |
 | SDK 版本 | `grep 'set(PICO_SDK_VERSION_' $PICO_SDK_PATH/pico_sdk_version.cmake` | 2.2.0 以前沒有 `dma_channel_config_t`、`dma_encode_transfer_count`（cheatsheet 有標） |
+| 板子是不是 RP2350B | 開機印 `NUM_BANK0_GPIOS` 要是 48；`grep PICO_BOARD build/CMakeCache.txt` | 是 `pico2` 就改用 `exam_rp2350b`，否則 GPIO 30–47 不能用 |
+| 腳位 | 考場文件 / 範例程式的 `#define`；沒有就跑 board-app 掃腳模式 | 填進 `board_pins.h` |
 | 有哪些工具 | `which picotool cmake ninja make riscv32-unknown-elf-gcc arm-none-eabi-gcc` | 沒有 picotool 就用拖放 `.uf2` 燒錄 |
 | 怎麼提交、看什麼分數 | 題目說明 | 決定先求對還是先求快 |
 | 小模型能力 | 貼 A，問「RP2350 的 DMA count 單位是什麼？」，要答「傳輸筆數」；再問「A 裡最後一條事實是什麼？」答得出來才代表 A 沒被截斷 | 答不好就改用 A-mini，題目只貼相關函式 |
@@ -104,7 +110,6 @@
 | 位元運算核心（popcount、parity、反轉、欄位） | B9 | 250 | [S09](solutions.md#s09) | 1100 | 1850 | 2950 |
 | 查表 vs 現算 | B10 | 200 | [S10](solutions.md#s10) | 750 | 1800 | 2550 |
 | 排序與搜尋 | B11 | 250 | [S11](solutions.md#s11) | 1000 | 1800 | 2800 |
-| ROS 2 processor：低延遲、高吞吐 | B12 | 450 | [S12](solutions.md#s12) | 1100 | 2050 | 3100 |
 | pthread 平行 reduce | B13 | 400 | [S13](solutions.md#s13) | 1000 | 2000 | 3000 |
 | 修好練習題的 critical section | B7 | 400 | [S14](solutions.md#s14) | 950 | 2000 | 2900 |
 | 矩陣乘法 / 2D 陣列：迴圈順序 | B14 | 300 | [S15](solutions.md#s15) | 550 | 1900 | 2450 |
@@ -121,9 +126,10 @@
 | 段落 | 約 token | 用途 |
 |---|---|---|
 | B0 把參考解答改成這題 | 250 | 沒有對應 B 時，B0 + solutions.md 那一節 |
+| **B18 板上周邊**（LED、蜂鳴器、按鍵、馬達、編碼器、伺服、I2C、LCD、UART） | 750 + board_pins.h 600 | 題目要動板上硬體時，A + B18 + 你的 board_pins.h |
+| B19 文件 → board_pins.h | 250 + 文件 | 拿到板子文件或原理圖時，叫小模型抽出腳位 |
 | C 編譯錯誤 | 300 | |
 | D 找瓶頸 | 350 | |
-| E ROS 2 除錯 | 300 | |
 | F 對拍測試 | 200 | |
 | G 數論 / 圖論 | 150 | 再加 algorithms.md 的一小節 |
 | H1 修正迴圈 | 350 | 每次失敗重貼 |

@@ -1,7 +1,7 @@
-# RP2350 / Linux / ROS 2 效能優化速查（上機考用）
+# RP2350 / Linux 效能優化速查（上機考用）
 
 > 這是 [cheatsheet.md](cheatsheet.md) 的續篇，專講「讓程式更快」。
-> **查證方式**：pico-sdk 名稱對照 `raspberrypi/pico-sdk` 2.3.1 原始碼，C 範例用 SDK 標頭以 clang 對 RISC-V（`rp2350-riscv`）與 Arm（Cortex-M33）兩種目標做過語法檢查；`.pio` 用 SDK 的 `pioasm` 組譯過；演算法技巧在 Linux 上以 200 萬筆隨機輸入比對「前後結果完全一致」；組合語言輸出是 clang 以 RP2350 的 `-march` 實際產生的；pthread 範例在 4 核 Linux VM 上跑過；ROS 2 名稱對照 `ros2/*` 的 `jazzy` 分支原始碼。
+> **查證方式**：pico-sdk 名稱對照 `raspberrypi/pico-sdk` 2.3.1 原始碼，C 範例用 SDK 標頭以 clang 對 RISC-V（`rp2350-riscv`）與 Arm（Cortex-M33）兩種目標做過語法檢查；`.pio` 用 SDK 的 `pioasm` 組譯過；演算法技巧在 Linux 上以 200 萬筆隨機輸入比對「前後結果完全一致」；組合語言輸出是 clang 以 RP2350 的 `-march` 實際產生的；pthread 範例在 4 核 Linux VM 上跑過。
 > **範本裡自己定義的函式不是 SDK API**（例如 `dma_copy_start`、`dma_sum`、`dma_handler`、`ring_capture_start`、`pingpong_start`、`consume`、`spsc_push`/`spsc_pop`、`sum_parallel`、`split_init`、`overclock`、`bench`、`measure`、`cyc`、`pin_table`、`bus_dma_first`、`par_after_init`），只能整段照抄；表格裡列的才是 SDK 名稱。
 > RP2350 datasheet 本身這次下載被擋，**只出現在 datasheet、沒能對到 SDK 原始碼的數字一律標「未查證」**。Hazard3 指令週期數取自 Hazard3 官方 repo 文件（RP2350 用的就是 Hazard3），不是 RP2350 datasheet。
 
@@ -13,7 +13,6 @@
 5. 卸載與平行（DMA 乒乓、環形、sniff、PIO、雙核心、無鎖佇列）
 6. 時脈與電壓
 7. Linux pthread
-8. ROS 2
 9. 叫考場小模型優化用的 prompt
 10. 未查證清單
 
@@ -775,134 +774,6 @@ atomic : 0.400s total=8000000   ← 高度搶用時 atomic 不一定比 mutex �
 
 ---
 
-## 8. ROS 2 Jazzy
-
-### 8.1 QoS 選擇
-
-| 需求 | 設定 |
-|---|---|
-| 低延遲、可丟資料（感測器） | `qos_profile_sensor_data`（KEEP_LAST、depth 5、BEST_EFFORT、VOLATILE）；C++ `rclcpp::SensorDataQoS()` |
-| 只要最新一筆 | `depth=1` + `BEST_EFFORT` |
-| 不能掉 | `RELIABLE` + 夠大的 `depth` |
-| 晚加入也要收到最後一筆 | `DurabilityPolicy.TRANSIENT_LOCAL`（發布端與訂閱端都要設） |
-
-**QoS 不相容就收不到**：發布端 BEST_EFFORT、訂閱端 RELIABLE → 不會連上。用 `ros2 topic info -v /topic` 看兩邊設定。
-
-### 8.2 rclpy 範本（`python3 -m py_compile` 通過，名稱對照原始碼）
-
-```python
-# rclpy 高頻 topic：sensor QoS + 多執行緒 executor + 回呼群組
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy, qos_profile_sensor_data
-from rclpy.executors import MultiThreadedExecutor
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
-from std_msgs.msg import Int32MultiArray
-
-FAST = QoSProfile(depth=1,                                   # 只要最新一筆
-                  reliability=ReliabilityPolicy.BEST_EFFORT,  # 不重送，延遲低
-                  history=HistoryPolicy.KEEP_LAST,
-                  durability=DurabilityPolicy.VOLATILE)
-
-class Worker(Node):
-    def __init__(self):
-        super().__init__('worker')
-        self.cb_io = ReentrantCallbackGroup()                 # 可同時跑多個
-        self.cb_ctl = MutuallyExclusiveCallbackGroup()        # 一次一個
-        self.pub = self.create_publisher(Int32MultiArray, 'out', FAST)
-        self.create_subscription(Int32MultiArray, 'in', self.on_in, qos_profile_sensor_data,
-                                 callback_group=self.cb_io)
-        self.create_timer(0.1, self.on_timer, callback_group=self.cb_ctl)
-        self.msg = Int32MultiArray()                          # 重複使用，不要每次 new
-
-    def on_in(self, m):
-        # 熱路徑別 print / get_logger().info；大量數值用 numpy 或 array 批次處理
-        self.msg.data = [v * 2 for v in m.data]
-        self.pub.publish(self.msg)
-
-    def on_timer(self):
-        pass
-
-def main():
-    rclpy.init()
-    node = Worker()
-    ex = MultiThreadedExecutor(num_threads=4)
-    ex.add_node(node)
-    try:
-        ex.spin()
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
-
-if __name__ == '__main__':
-    main()
-```
-
-- `MultiThreadedExecutor(num_threads=None)` 預設用 `os.sched_getaffinity(0)` 的核心數。
-- 同一個 `MutuallyExclusiveCallbackGroup` 的回呼不會同時跑；要並行就放 `ReentrantCallbackGroup` 或不同群組。
-- Python 的 GIL 讓純 Python 運算多執行緒也不會變快；重運算改 numpy、C++ 節點，或拆成多個 process。
-- jazzy 分支原始碼有 `rclpy.experimental.EventsExecutor`，但考場裝的版本不一定有 → 未查證，先 `import` 試。
-
-### 8.3 rclcpp 同 process 零拷貝（名稱對照原始碼，**沒有實際編譯**，考場沒有 ROS 環境我無法測）
-
-```cpp
-// rclcpp 同 process 零拷貝：use_intra_process_comms + publish(unique_ptr)
-#include <memory>
-#include "rclcpp/rclcpp.hpp"
-#include "std_msgs/msg/int32.hpp"
-using std_msgs::msg::Int32;
-
-class Prod : public rclcpp::Node {
-public:
-  explicit Prod(const rclcpp::NodeOptions & o) : Node("prod", o) {
-    pub_ = create_publisher<Int32>("num", rclcpp::QoS(rclcpp::KeepLast(10)));
-    timer_ = create_wall_timer(std::chrono::milliseconds(1), [this] {
-      auto m = std::make_unique<Int32>();
-      m->data = n_++;
-      pub_->publish(std::move(m));               // 交出所有權，同 process 訂閱者可拿到同一塊記憶體
-    });
-  }
-private:
-  rclcpp::Publisher<Int32>::SharedPtr pub_; rclcpp::TimerBase::SharedPtr timer_; int n_ = 0;
-};
-class Cons : public rclcpp::Node {
-public:
-  explicit Cons(const rclcpp::NodeOptions & o) : Node("cons", o) {
-    sub_ = create_subscription<Int32>("num", rclcpp::QoS(rclcpp::KeepLast(10)),
-      [](Int32::UniquePtr m) { (void)m; });      // 收 unique_ptr
-  }
-private:
-  rclcpp::Subscription<Int32>::SharedPtr sub_;
-};
-int main(int argc, char ** argv) {
-  rclcpp::init(argc, argv);
-  auto opt = rclcpp::NodeOptions().use_intra_process_comms(true);
-  rclcpp::executors::MultiThreadedExecutor ex(rclcpp::ExecutorOptions(), 2);  // 2 條執行緒
-  auto p = std::make_shared<Prod>(opt);
-  auto c = std::make_shared<Cons>(opt);
-  ex.add_node(p); ex.add_node(c);
-  ex.spin();
-  rclcpp::shutdown();
-}
-```
-
-- `rclcpp::NodeOptions().use_intra_process_comms(true)`：同 process 的節點直接傳指標，不經序列化。
-- 發布 `std::unique_ptr` 並 `std::move`；訂閱端收 `UniquePtr` 才能做到不複製（哪些 QoS 組合支援 intra-process：未查證）。
-- `rclcpp::executors::MultiThreadedExecutor(options, number_of_threads, yield_before_execute, timeout)`；還有 `SingleThreadedExecutor`、`StaticSingleThreadedExecutor`、`rclcpp::experimental::executors::EventsExecutor`。
-- Loaned message：`pub->can_loan_messages()`、`pub->borrow_loaned_message()`，要看 RMW 支不支援。
-
-### 8.4 量測
-
-| 指令 | 量什麼 |
-|---|---|
-| `ros2 topic hz /t [-w N] [--wall-time]` | 頻率（`-w` 視窗大小） |
-| `ros2 topic bw /t [-w N]` | 頻寬 |
-| `ros2 topic delay /t` | 端到端延遲（訊息要有 `header.stamp`） |
-| `ros2 topic info -v /t` | 看兩端 QoS |
-| 上面幾個都可加 `--qos-reliability best_effort` 等 `--qos-*` 參數 | 配合發布端 QoS 才收得到 |
-
----
-
 ## 9. 叫考場小模型優化用的 prompt
 
 先貼 [cheatsheet.md](cheatsheet.md) 第 9 節的基本 prompt，再接這段：
@@ -941,6 +812,4 @@ int main(int argc, char ** argv) {
 - RP2350 datasheet 的數字：最高額定時脈、各電壓對應頻率、Cortex-M33 `udiv` 週期數、DCP 與 VFP 實際速度、匯流排仲裁細節。
 - Arm DWT `dwt_cyccnt` 在 RP2350 實機可用（暫存器存在於 SDK 標頭，沒上機測）。
 - LTO 支援（SDK cmake 裡找不到）。
-- rclcpp intra-process 支援的 QoS 組合；rclcpp 範例沒有實際編譯。
-- `rclpy.experimental.EventsExecutor` 是否在考場安裝的 Jazzy 版本裡。
 - Hazard3 週期數取自 Hazard3 repo（假設最高效能設定），RP2350 實際值以 datasheet 為準。

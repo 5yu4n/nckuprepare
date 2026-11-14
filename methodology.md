@@ -35,7 +35,7 @@
 |---|---|
 | n | 輸入最大多少（決定要哪個複雜度，見第 1 節表） |
 | 評分 | 看總時間？最慢一筆？只看正確？能不能超頻、用第二顆核心、改 CMake？ |
-| 在哪跑 | 板子（pico-sdk）／ Linux ／ ROS 2 |
+| 在哪跑 | 板子（pico-sdk）／ Linux |
 | 熱點 | 原版程式裡最深的那個迴圈在做什麼（搬資料？算？等？） |
 | 文件給的特殊東西 | 題目文件裡的 API、暫存器、硬體區塊（文件優先於筆記） |
 
@@ -112,7 +112,6 @@
 | RP2350 | `time_us_64()`；細到週期：RISC-V `mcycle`（先 `csrci mcountinhibit, 5`）、Arm `m33_hw->dwt_cyccnt`（範本見 [optimization.md](optimization.md) 第 1 節） |
 | Linux 整支程式 | `time ./app < in.txt`（看 real 與 user：user ≫ real 代表平行有效；real ≫ user 代表在等 I/O 或鎖） |
 | Linux 函式層級 | 手動 `clock_gettime(CLOCK_MONOTONIC)`；有裝的話 `perf stat ./app`、`perf record` + `perf report`；`gcc -pg` + `gprof`（環境有沒有裝：未查證，考場先試） |
-| ROS 2 | `ros2 topic hz`、`ros2 topic bw`、`ros2 topic delay`（訊息要有 header） |
 
 **量測規則**：
 - 同一段跑多次（例如 20 次）取**最小值**；第一次常包含快取冷啟動、分頁錯誤。
@@ -202,7 +201,6 @@
 
 - 提高時脈：`set_sys_clock_khz`（電壓先升，`vreg_set_voltage`）。
 - Linux：快速 I/O（下面的範本實測 0.40 s → 0.17 s）、綁核心（`taskset`）。
-- ROS 2：拿掉 `print`、重用訊息物件、QoS 配對正確、必要時改 C++。
 
 ---
 

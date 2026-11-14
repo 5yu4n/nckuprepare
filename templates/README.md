@@ -6,8 +6,9 @@
 
 | 題目在哪跑 | 複製這個 | 第一步 |
 |---|---|---|
-| RP2350 板子（pico-sdk） | [pico-app/](pico-app/) | 從 `$PICO_SDK_PATH/external/` 複製 `pico_sdk_import.cmake` 進來，照 `CMakeLists.txt` 開頭建置 |
-| Linux（pthread、ROS 2 以外的 C 題） | [linux-app/](linux-app/) | `make && ./app` |
+| **考場板子周邊**（LED、蜂鳴器、按鍵、馬達、編碼器、伺服、I2C、LCD、UART、ADC） | [board-app/](board-app/) | 改 `board_pins.h` 腳位；`cmake -DMODE=1 ..` 掃輸入腳、`-DMODE=2` 掃 LED 腳。說明在 [../board.md](../board.md) |
+| RP2350 板子（pico-sdk）優化題對拍 | [pico-app/](pico-app/) | 從 `$PICO_SDK_PATH/external/` 複製 `pico_sdk_import.cmake` 進來，照 `CMakeLists.txt` 開頭建置 |
+| Linux（電腦上對拍、pthread） | [linux-app/](linux-app/) | `make && ./app` |
 | 板子壞了或還沒拿到 | [pico-app/](pico-app/) | `gcc -O2 main.c -o t && ./t`：同一份 `main.c` 在電腦上也能編，先驗證邏輯 |
 
 `main.c` 的流程：原版 `work_ref` 當正確答案 → 7 種測資（亂數、全 0、全 1、遞增、遞減……）× 16 種長度（0、1、不是 4 的倍數、剛好跨過門檻、最大）逐一對拍 → 全部一樣才計時 → 印出 `ALL PASS`。有錯就印 `FAIL` 和第一個不同的位置。

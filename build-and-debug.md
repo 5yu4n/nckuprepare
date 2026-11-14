@@ -11,9 +11,11 @@
 cmake_minimum_required(VERSION 3.13)
 
 # 1. 板子與架構：要在 include(pico_sdk_import.cmake) 之前設定
-#    也可以在命令列給：cmake -DPICO_BOARD=pico2 -DPICO_PLATFORM=rp2350-riscv ..
+#    考場板子是 RP2350B：用 templates/board-app/boards/exam_rp2350b.h（PICO_RP2350A=0，48 支 GPIO）
+#    不要用 pico2（那是 RP2350A，只有 GPIO 0–29）。見 board.md 第 0 節。
+list(APPEND PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR}/boards)   # 放 exam_rp2350b.h 的資料夾
 if (NOT PICO_BOARD)
-    set(PICO_BOARD pico2)                 # Pico 2 W 用 pico2_w；別家板子看 pico-sdk/src/boards/include/boards/
+    set(PICO_BOARD exam_rp2350b)
 endif()
 if (NOT PICO_PLATFORM)
     set(PICO_PLATFORM rp2350-riscv)       # Arm 版：rp2350-arm-s
@@ -78,7 +80,7 @@ pico_add_extra_outputs(app)
 ```sh
 export PICO_SDK_PATH=/path/to/pico-sdk        # 考場若已設好就跳過
 mkdir -p build && cd build
-cmake -DPICO_BOARD=pico2 -DPICO_PLATFORM=rp2350-riscv ..   # Arm：rp2350-arm-s
+cmake -DPICO_PLATFORM=rp2350-riscv ..   # Arm：rp2350-arm-s（板子由 CMakeLists 設成 exam_rp2350b）
 make -j4                                       # 或 cmake -G Ninja 之後用 ninja
 ls *.uf2 *.dis                                 # app.uf2 燒錄用；app.dis 反組譯
 ```
@@ -290,4 +292,4 @@ int main(void) {
 | 答案錯 | 用 `bench_same_u32` 對原版；測邊界：長度 0、1、不是 4 的倍數、最大值、全 0、全 1、負數；查溢位（加總用 `int64_t`） |
 | 執行錯誤 / 逾時無輸出 | 6.1、6.2；先把優化拿掉一半，找出是哪一步弄壞的 |
 | 太慢 | [methodology.md](methodology.md) 第 0 節；[prompts.md](prompts.md) D 找瓶頸 |
-| 輸出格式錯 | 換行、空白、大小寫；Python 的 `print(..., flush=True)`；ROS 2 的 topic 名稱 |
+| 輸出格式錯 | 換行、空白、大小寫；Python 的 `print(..., flush=True)` |

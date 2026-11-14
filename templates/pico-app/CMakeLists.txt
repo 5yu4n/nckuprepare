@@ -1,13 +1,15 @@
 # templates/pico-app：複製整個資料夾 → 改 main.c → 建置。
 #   mkdir build && cd build
-#   cmake -DPICO_BOARD=pico2 -DPICO_PLATFORM=rp2350-riscv ..     # Arm 版：-DPICO_PLATFORM=rp2350-arm-s
+#   cmake -DPICO_PLATFORM=rp2350-riscv ..     # Arm 版：-DPICO_PLATFORM=rp2350-arm-s（板子預設用 boards/exam_rp2350b.h）
 #   make -j4                                                       # 產生 app.uf2、app.dis
 # 需要 pico_sdk_import.cmake：從 $PICO_SDK_PATH/external/pico_sdk_import.cmake 複製到這個資料夾。
 # 考場若已給 CMakeLists.txt，照考場的，只把下面 target_link_libraries 缺的庫加進去。
 cmake_minimum_required(VERSION 3.13)
 
+# 考場板子是 RP2350B（48 GPIO）：用 boards/exam_rp2350b.h。用 pico2 的話 GPIO 30–47 不能用。
+list(APPEND PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR}/boards)
 if (NOT PICO_BOARD)
-    set(PICO_BOARD pico2)
+    set(PICO_BOARD exam_rp2350b)
 endif()
 if (NOT PICO_PLATFORM)
     set(PICO_PLATFORM rp2350-riscv)

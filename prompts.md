@@ -1,6 +1,6 @@
 # 貼給考場小模型的 prompt（Gemma 級、約 8k context）
 
-> 寫法針對「推理弱、context 短」的小模型：規則短、步驟編號、輸出格式寫死、禁止自創函式、不確定就說「不確定」、最後要它自我檢查。所有 API 名稱都對照 pico-sdk 2.3.1、ROS 2 Jazzy 原始碼查過（見 [cheatsheet.md](cheatsheet.md)）。
+> 寫法針對「推理弱、context 短」的小模型：規則短、步驟編號、輸出格式寫死、禁止自創函式、不確定就說「不確定」、最後要它自我檢查。所有 API 名稱都對照 pico-sdk 2.3.1 原始碼查過（見 [cheatsheet.md](cheatsheet.md)）。
 > 相關檔案：[00-START.md](00-START.md)（每段 token 預算）、[build-and-debug.md](build-and-debug.md)、[solutions.md](solutions.md)（完整解答）、[rp2350-riscv.md](rp2350-riscv.md)（Hazard3 冷門知識）、[methodology.md](methodology.md)（方法論）、[optimization.md](optimization.md)、[algorithms.md](algorithms.md)（數論、圖論）。
 
 ## 怎麼用（context 預算）
@@ -34,12 +34,15 @@
 4. 回答格式固定：(1) 改了什麼，一句 (2) 完整新函式，不准用省略號 (3) 為什麼快，一句 (4) 還能疊哪一層 (5) 自我檢查。
 
 【事實】RP2350：2 核，RISC-V 版沒有 FPU、沒有硬體除法器（除法約 18 週期，乘法 1 週期）；SRAM 520 KB；3 個 PIO × 4 個 SM；16 個 DMA 通道；SDK 預設 -O3。
+【板子】RP2350B（GPIO 0–47，ADC 只在 GPIO 40–47）。腳位一律用 board_pins.h 的名稱（PIN_WS2812、PIN_BUZZER、PIN_KEY1、PIN_M1_IN1…、PIN_ENC1_A…、PIN_SERVO1、PIN_I2C0_SDA…、PIN_LCD_*、PIN_UART0_TX…），不准寫數字。周邊用 board.h 的函式，不要重寫。
 
 【API】
 DMA：dma_claim_unused_channel(true)、dma_channel_get_default_config(ch)、channel_config_set_transfer_data_size(&c, DMA_SIZE_32)、channel_config_set_read_increment(&c, b)、channel_config_set_write_increment(&c, b)、channel_config_set_dreq(&c, pio_get_dreq(pio, sm, is_tx))、dma_channel_configure(ch, &c, dst, src, count, start)、dma_channel_start(ch)、dma_channel_wait_for_finish_blocking(ch)。count 是筆數不是位元組。
 PIO：pio_add_program、pio_claim_unused_sm(pio, true)、pio_sm_init、pio_sm_set_enabled、pio_sm_put_blocking、pio_sm_get_blocking、sm_config_set_out_shift / in_shift(&c, 右移, auto, 32)、sm_config_set_fifo_join。DMA 寫 &pio->txf[sm]、讀 &pio->rxf[sm]。
 同步：spin_lock_claim_unused(true)、spin_lock_init(n)、save = spin_lock_blocking(lk)、spin_unlock(lk, save)、critical_section_enter_blocking / exit、atomic_fetch_add_explicit。
 雙核：multicore_launch_core1(fn)（只呼叫一次）、multicore_fifo_push_blocking(u32)、multicore_fifo_pop_blocking()。
+GPIO/PWM：gpio_init、gpio_set_dir(p, GPIO_OUT)、gpio_put、gpio_get、gpio_pull_up、gpio_set_function(p, GPIO_FUNC_PWM)、pwm_gpio_to_slice_num、pwm_set_clkdiv、pwm_set_wrap、pwm_set_gpio_level、pwm_set_enabled、gpio_set_irq_enabled_with_callback、add_repeating_timer_ms(-10, cb, NULL, &t)。
+I2C/SPI/UART/ADC：i2c_init、i2c_write_timeout_us、i2c_read_timeout_us、spi_init、spi_set_format、spi_write_blocking、uart_init、UART_FUNCSEL_NUM(uart, gpio)、uart_puts、uart_getc、uart_is_readable、adc_init、adc_gpio_init、adc_select_input(gpio-40)、adc_read。
 其他：time_us_64()、__not_in_flash_func(名稱)、__builtin_popcount / clz / ctz / bswap32。Linux：pthread_create / join、pthread_spin_lock，編譯加 -pthread。
 現成模組（我貼了才能用，直接呼叫，不要重寫）：dma_copy(dst, src, bytes)、dma_fill32(dst, v, words)、dual_run(work, ctx, n)、pio_stream_start / wait、q16_mul、isqrt32、fx_sin、ring_push / ring_pop、par_for(n, work, ctx)。
 
@@ -71,7 +74,7 @@ PIO：pio_add_program、pio_claim_unused_sm(pio, true)、pio_sm_init、pio_sm_se
 ### A-mini（context 很緊時）
 
 ````text
-你是效能工程師。規則：只用我貼的程式與題目文件裡出現的函式名稱，不確定就說「不確定」；一次只改一處；輸出「完整新函式 + 一句理由」；保留原版，新版叫 xxx_fast；DMA count 是筆數不是位元組；RISC-V 沒有 FPU、沒有硬體除法器；先換演算法，再改資料排列與迴圈內容，再用 DMA/PIO 和雙核，全部疊上去。題目像數學或圖論（計數、取模、最短路、DP）就叫我貼 algorithms.md 的段落。
+你是效能工程師。板子是 RP2350B，腳位只用 board_pins.h 的 PIN_ 名稱，周邊只用 board.h 的函式。規則：只用我貼的程式與題目文件裡出現的函式名稱，不確定就說「不確定」；一次只改一處；輸出「完整新函式 + 一句理由」；保留原版，新版叫 xxx_fast；DMA count 是筆數不是位元組；RISC-V 沒有 FPU、沒有硬體除法器；先換演算法，再改資料排列與迴圈內容，再用 DMA/PIO 和雙核，全部疊上去。題目像數學或圖論（計數、取模、最短路、DP）就叫我貼 algorithms.md 的段落。
 ````
 
 ---
@@ -433,37 +436,6 @@ static inline unsigned ring_pop_many(ring_t *r, uint32_t *out, unsigned max) {
 【原程式】{貼程式}
 ````
 
-### B12. ROS 2 node 延遲 / 吞吐（對應 S12）
-
-````text
-任務：讓這個 ROS 2 node 更快或不掉資料。
-固定檢查：
-1. callback 裡有 print / get_logger().info → 拿掉。
-2. 每則都 new 訊息 → 在 __init__ 建一次重複使用。
-3. QoS：發布端不要隨便改 BEST_EFFORT（對方訂閱是 RELIABLE 就連不上）；不確定就兩邊都用 depth 10 預設。
-4. topic 名稱與題目完全相同（含開頭 /）。
-5. 吞吐量很高 → 寫成 rclcpp C++。
-已查證的名稱：rclpy.qos 的 QoSProfile、ReliabilityPolicy.RELIABLE / BEST_EFFORT、HistoryPolicy.KEEP_LAST、DurabilityPolicy.VOLATILE / TRANSIENT_LOCAL、qos_profile_sensor_data；rclpy.executors.MultiThreadedExecutor(num_threads=4)；rclpy.callback_groups.MutuallyExclusiveCallbackGroup / ReentrantCallbackGroup。
-參考（練習題 processor 的優化版）：
-```python
-        super().__init__('processor')
-        self.pub = self.create_publisher(Int32, OUT_TOPIC, OUT_QOS)
-        self.out = Int32()                                   # 重複使用，不要每則 new
-        self.create_subscription(Int32, IN_TOPIC, self.on_msg, IN_QOS)
-
-    def on_msg(self, m):
-        # 拿掉 print(..., flush=True)：每則訊息一次系統呼叫，是最大的延遲來源
-        self.out.data = m.data * 2
-        self.pub.publish(self.out)
-
-
-def main():
-```
-【題目】{貼題目}
-【原程式】{貼程式}
-輸出：完整新檔 + 改了哪幾點（條列）+ 用哪個 ros2 指令驗證（ros2 topic hz / bw / info -v）。
-````
-
 ### B13. pthread 平行加總 / 最大值 / 計數（對應 S13）
 
 ````text
@@ -625,6 +597,47 @@ static void core1_entry(void) {
 
 ---
 
+### B18. 板上周邊：LED、蜂鳴器、按鍵、馬達、編碼器、伺服、I2C、LCD、UART（對應 board.md）
+
+先貼 A，再貼這段，最後貼你的 `board_pins.h`（填好腳位的版本，約 600 token）。不用貼 board.h 全文，下面已列出它的函式。
+
+````text
+任務：用板上周邊完成題目要求。板子是 RP2350B 機器人控制板。
+【可用函式（board.h，已寫好，直接呼叫，不准重寫、不准改名）】
+leds_init(); leds_set(i, r, g, b); leds_show();          // 6 顆 WS2812，i = 0..5，設完要 leds_show 才會更新
+buzzer_init(); buzzer_tone(hz); buzzer_beep(hz, ms);      // hz = 0 靜音；buzzer_beep 會阻塞 ms
+keys_init(); key_raw(i); key_pressed_edge(i);             // i = 0 是 KEY1、1 是 KEY2；key_pressed_edge 每 1 ms 呼叫一次，剛按下回 true
+motors_init(); motor_set(m, speed); motor_brake(m);       // m = 0..3，speed = -1000..1000
+encoders_init(); encoder_get(i);                          // i = 0..3，回傳 int32_t 累計計數
+servo_init(pin); servo_deg(pin, deg); servo_us(pin, us);  // pin 用 PIN_SERVO1 等
+i2c_bus_init(i2c0, PIN_I2C0_SDA, PIN_I2C0_SCL, 400000); i2c_scan(i2c0);
+i2c_reg_read(i2c0, addr, reg, buf, n); i2c_reg_write(i2c0, addr, reg, val);   // 回傳 < 0 表示失敗
+lcd_init(); lcd_fill(x, y, w, h, RGB565(r, g, b));
+uart_link_init(uart1, PIN_UART1_TX, PIN_UART1_RX, 115200); uart_read_line(u, buf, cap, &len);  // 非阻塞，整行回傳長度否則 -1
+vbat_init(); vbat_read();                                  // 回傳 float 伏特
+【規則】
+1. 腳位只寫 PIN_ 名稱。PWM 同一個 slice（相鄰兩支腳 2k、2k+1）頻率共用：伺服(50 Hz)和馬達(20 kHz)不能放同一個 slice。
+2. 主迴圈不准長時間 sleep_ms；要同時顧多件事就用 absolute_time_t t = make_timeout_time_ms(n); if (time_reached(t)) {...}。
+3. 固定週期控制（例如每 10 ms 算一次速度）用 add_repeating_timer_ms(-10, cb, NULL, &timer)；callback 內不准 printf、不准 sleep，回傳 true。
+4. 速度 = 每週期編碼器計數差值。PI 控制：out = Kp*err + Ki*積分，積分要限幅。
+5. 中斷和主迴圈共用的變數加 volatile。
+【輸出】(1) 完整 main.c（#include "board_pins.h" 再 #include "board.h"）(2) CMakeLists 需要加的連結庫（若有）(3) 怎麼在板上驗證，三步以內 (4) 自我檢查：沒寫死腳位數字？沒在 callback 裡 printf？leds_set 後有 leds_show？
+【題目】{貼題目}
+【board_pins.h】{貼}
+````
+
+### B19. 文件或原理圖 → board_pins.h
+
+````text
+下面是考場提供的板子文件（或原理圖的文字、範例程式）。請只做一件事：把每個周邊用到的 GPIO 號碼找出來，填進這個表，找不到的寫「找不到」，不准猜。
+周邊清單：WS2812 資料腳、蜂鳴器、KEY1、KEY2、M1–M4 各兩支控制腳（IN1/IN2 或 PWM/DIR，寫明是哪種）、編碼器 1–4 的 A/B、伺服或 IO 排針、I2C0 SDA/SCL、I2C1 SDA/SCL、UART0 TX/RX、無線模組的介面與腳位、LCD 的 SCK/MOSI/CS/DC/RST/BL、電池電壓 ADC 腳與分壓電阻。
+輸出：(1) 表格：周邊 | GPIO | 文件原文出處（一句）(2) 照下面格式的 #define 清單，可以直接貼進 board_pins.h：#define PIN_XXX n  // 出處
+規則：GPIO 號碼範圍 0–47；ADC 只能在 40–47；一樣的號碼出現兩次就標「衝突」。
+【文件】{貼}
+````
+
+---
+
 ## C. 編譯錯誤修正
 
 ````text
@@ -660,26 +673,6 @@ static void core1_entry(void) {
 最後：依「預估節省時間」排序，列出前 3 個要改的地方（只列，不要寫程式）。
 【輸入範圍與時間限制】{貼}
 【程式】{貼}
-````
-
----
-
-## E. ROS 2 除錯
-
-````text
-ROS 2 Jazzy 的資料沒有正常流動。請依序檢查，每步告訴我要執行哪個指令、看到什麼代表正常：
-1. node 有沒有跑：ros2 node list
-2. topic 有沒有、名稱對不對：ros2 topic list
-3. 型別對不對：ros2 topic info /{topic} -v（看 Type、Publisher count、Subscription count、兩端 QoS）
-4. 有沒有資料：ros2 topic echo /{topic} --once
-5. 頻率：ros2 topic hz /{topic}
-6. QoS 相容嗎？（訂閱 RELIABLE + 發布 BEST_EFFORT → 不相容；TRANSIENT_LOCAL 要兩邊都設）
-7. 新開的終端機有沒有 source /opt/ros/jazzy/setup.bash？
-8. 手動發一筆測試：ros2 topic pub --once /{topic} std_msgs/msg/Int32 "{data: 5}"
-只能用上面出現的指令。根據我貼的輸出判斷卡在哪一步，再給一個修正。
-【現象】{例：/double 收不到資料}
-【指令輸出】{貼}
-【程式】{貼 node}
 ````
 
 ---
@@ -737,7 +730,7 @@ ROS 2 Jazzy 的資料沒有正常流動。請依序檢查，每步告訴我要�
 用 5 行以內說明下面這段程式，每行一件事，照這個順序：
 1. 輸入是什麼、輸出是什麼
 2. 主要迴圈或流程在做什麼
-3. 用到哪些硬體或 API（DMA、PIO、多核、鎖、ROS 2 topic）
+3. 用到哪些硬體或 API（DMA、PIO、多核、鎖、PWM、I2C、SPI、UART、ADC）
 4. 最花時間的是哪一行（寫行號）和原因
 5. 有沒有看起來故意放的錯（count 單位、沒等完成、鎖範圍、溢位）
 不要改程式，不要給建議，不要超過 5 行。

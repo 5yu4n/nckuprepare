@@ -1,8 +1,8 @@
 # 預測考題 × 完整優化解答（上機考用）
 
-> 依練習材料（`demo_2`：ROS 2 topic 管線、bitwise 與 PIO echo、spinlock 臨界區、transfer engine）和考試公告（讀文件掌握軟硬體架構、優化程式與整體系統效能、Online Judge 計分）推測的題型。**每題都能單獨複製貼給小模型**，不必連整份一起貼。
+> 依練習材料（`demo_2`：bitwise 與 PIO echo、spinlock 臨界區、transfer engine）和考試公告（讀文件掌握軟硬體架構、優化程式與整體系統效能、Online Judge 計分）推測的題型。**每題都能單獨複製貼給小模型**，不必連整份一起貼。
 >
-> **查證方式**：RP2350 程式用 pico-sdk 2.3.1 標頭以 clang 對 `rp2350-riscv` 與 Arm Cortex-M33 兩種目標做過語法檢查（沒有開發板，**沒在實機上跑**）；`.pio` 用 SDK 的 pioasm 組譯過；能在一般電腦上跑的（位元運算、查表、排序、CRC、SPSC、pthread、矩陣）都用隨機資料比對過「優化前後結果完全相同」並實測時間（4 核 Linux VM，GCC 13）；手寫 RISC-V 組合語言用自寫的指令模擬器比對過結果；ROS 2 名稱對照 Jazzy 原始碼，Python 版過了 `py_compile`，C++ 版沒有編譯。標「估計」的加速比是推算，不是量出來的。
+> **查證方式**：RP2350 程式用 pico-sdk 2.3.1 標頭以 clang 對 `rp2350-riscv` 與 Arm Cortex-M33 兩種目標做過語法檢查（沒有開發板，**沒在實機上跑**）；`.pio` 用 SDK 的 pioasm 組譯過；能在一般電腦上跑的（位元運算、查表、排序、CRC、SPSC、pthread、矩陣）都用隨機資料比對過「優化前後結果完全相同」並實測時間（4 核 Linux VM，GCC 13）；手寫 RISC-V 組合語言用自寫的指令模擬器比對過結果。標「估計」的加速比是推算，不是量出來的。
 >
 > 相關檔案：[00-START.md](00-START.md)（考試當天入口）、[build-and-debug.md](build-and-debug.md)（建置與除錯）、[cheatsheet.md](cheatsheet.md)（API 速查）、[optimization.md](optimization.md)（優化技巧）、[methodology.md](methodology.md)（卡住時照著走）、[prompts.md](prompts.md)（貼給小模型的 prompt）、[algorithms.md](algorithms.md)（數論、圖論）。
 
@@ -21,7 +21,6 @@
 | popcount、parity、bit reverse、取位元欄位、`clz`/`ctz`、RISC-V bit 指令 | [S09](#s09) |
 | 重複算同一個函式、sin/cos、byte 轉換表、查表 | [S10](#s10) |
 | 排序、找第 k 小、搜尋、中位數 | [S11](#s11) |
-| ROS 2 node、topic、延遲、`/number` → `/double` | [S12](#s12) |
 | pthread 平行加總 / 最大值 / 計數 | [S13](#s13) |
 | pthread 計數器少算、lock 太慢（練習題 critical-section） | [S14](#s14) |
 | 矩陣乘法、2D 陣列、影像、迴圈很多層 | [S15](#s15) |
@@ -61,7 +60,6 @@
 | [S09](#s09) 位元 | 逐位元 → SWAR / builtin | — | RAM | — | 執行緒 / 雙核 | 實測 353 → 10–18 ms，**20–37 倍** |
 | [S10](#s10) 查表 | 能算的就算 | 表放 RAM | — | — | — | 實測依函式而定（反轉位元現算較快） |
 | [S11](#s11) 排序 | qsort → 基數 / 計數排序 | — | — | — | — | 實測 7 倍（uint32）、150 倍（byte） |
-| [S12](#s12) ROS 2 | 拿掉 print、重用訊息 | — | 改 C++ | — | MultiThreadedExecutor | 估計，依題目量 |
 | [S13](#s13) pthread 加總 | 能用公式就不用迴圈 | 連續存取、結果 64 位元組對齊 | `-O3` | — | 每核一段 | 實測 3–4 倍 |
 | [S14](#s14) 臨界區 | 本地累加 | — | — | — | 只鎖合併那一行 | 實測 2.6 倍 |
 | [S15](#s15) 矩陣 | i-j-k → i-k-j | `restrict` | `-O3` | — | 每核分列 | 實測 34–54 → 5.7–10 ms，**4–8 倍** |
@@ -867,103 +865,6 @@ static inline int32_t kth_smallest(int32_t *a, int n, int k) {   // 會改動陣
 | 要查很多次但沒排序 | 先排序一次再二分；或雜湊（見 [algorithms.md](algorithms.md)） |
 
 **坑**：基數排序需要同大小暫存陣列（RP2350 記憶體有限）；有號整數要先 `x ^ 0x80000000`；`qsort` 的比較函式寫 `return a - b` 會溢位，要寫 `(a > b) - (a < b)`。
-
----
-
-<a id="s12"></a>
-## S12 ROS 2 processor：低延遲、高吞吐
-
-**題目特徵**：練習題 section2-1 的 `processor.py`（`/number` → ×2 → `/double`），或要你讓資料流更快、不掉資料。
-
-**Baseline**：練習題原版，每則訊息 `print(..., flush=True)`、每則 new 一個 `Int32()`。
-
-**最終版 Python**（`py_compile` 通過，名稱對照 rclpy jazzy）：
-
-```python
-"""S12 低延遲 processor：/number → ×2 → /double（對照 demo 的 processor.py）"""
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from std_msgs.msg import Int32
-
-IN_TOPIC, OUT_TOPIC = '/number', '/double'
-# 發布端保持 RELIABLE：若對方訂閱端是 RELIABLE 而我們發 BEST_EFFORT，會完全連不上
-OUT_QOS = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST)
-# 訂閱端：題目要「不能漏」→ RELIABLE；要「越新越好」→ BEST_EFFORT + depth=1（兩種發布端都相容）
-IN_QOS = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST)
-
-
-class Processor(Node):
-    def __init__(self):
-        super().__init__('processor')
-        self.pub = self.create_publisher(Int32, OUT_TOPIC, OUT_QOS)
-        self.out = Int32()                                   # 重複使用，不要每則 new
-        self.create_subscription(Int32, IN_TOPIC, self.on_msg, IN_QOS)
-
-    def on_msg(self, m):
-        # 拿掉 print(..., flush=True)：每則訊息一次系統呼叫，是最大的延遲來源
-        self.out.data = m.data * 2
-        self.pub.publish(self.out)
-
-
-def main():
-    rclpy.init()
-    node = Processor()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.try_shutdown()
-
-
-if __name__ == '__main__':
-    main()
-```
-
-**最終版 C++**（吞吐量要求很高時；名稱對照 rclcpp jazzy，**沒有實際編譯**）：
-
-```cpp
-// S12 C++ 版 processor（吞吐量要求高時用；名稱對照 rclcpp jazzy 原始碼，未實際編譯）
-#include <memory>
-#include "rclcpp/rclcpp.hpp"
-#include "std_msgs/msg/int32.hpp"
-
-class Processor : public rclcpp::Node {
-public:
-  Processor() : Node("processor") {
-    pub_ = create_publisher<std_msgs::msg::Int32>("/double", 10);
-    sub_ = create_subscription<std_msgs::msg::Int32>("/number", 10,
-      [this](const std_msgs::msg::Int32 & m) {
-        std_msgs::msg::Int32 out;
-        out.data = m.data * 2;
-        pub_->publish(out);
-      });
-  }
-private:
-  rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr pub_;
-  rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr sub_;
-};
-
-int main(int argc, char ** argv) {
-  rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<Processor>());
-  rclcpp::shutdown();
-  return 0;
-}
-```
-
-**為什麼快**：`print(flush=True)` 每則一次系統呼叫，是 Python 版最大的延遲來源；重複使用訊息物件省配置；C++ 省掉 Python 直譯與 GIL。
-
-**加速**：未量（考場外沒有 ROS 環境）。
-
-**量測與除錯**：`ros2 topic hz /double`、`ros2 topic bw /double`、`ros2 topic delay /double`（訊息要有 header 才行，`Int32` 沒有）、`ros2 topic info -v /double`（看兩端 QoS）、`ros2 node info /processor`。
-
-**坑**：
-- **QoS 不相容就完全收不到**：訂閱端 RELIABLE + 發布端 BEST_EFFORT → 連不上。不確定時兩邊都用預設（depth 10、RELIABLE）。
-- topic 名稱有沒有開頭 `/`、大小寫，要跟題目完全一樣。
-- 新開的終端機要先 `source /opt/ros/jazzy/setup.bash`（練習環境的 `.bashrc` 已處理）。
 
 ---
 

@@ -1,16 +1,18 @@
-# RP2350 / pico-sdk / RISC-V / ROS 2 上機考速查筆記
+# RP2350 / pico-sdk / RISC-V 上機考速查筆記
 
-> **查證方式**：所有 pico-sdk 名稱都對照 `raspberrypi/pico-sdk` 原始碼（2.3.1，2026-09），並確認 **2.0.0 起就都存在**；C 範例用 SDK 標頭以 clang 對 RISC-V（`rp2350-riscv`）與 Arm（Cortex-M33）兩種目標做過語法檢查；`.pio` 範例用 SDK 內的 `pioasm` 實際組譯過；RISC-V 指令用 clang 以 RP2350 的 `-march` 實際組譯過；pthread / 位元運算範例在 Linux 上編譯執行過；rclpy / rclcpp / ros2 CLI 名稱對照 `ros2/*` 的 `jazzy` 分支原始碼。
+> **考場板子（RP2350B 機器人控制板）的周邊用法在 [board.md](board.md)。**
+
+> **查證方式**：所有 pico-sdk 名稱都對照 `raspberrypi/pico-sdk` 原始碼（2.3.1，2026-09），並確認 **2.0.0 起就都存在**；C 範例用 SDK 標頭以 clang 對 RISC-V（`rp2350-riscv`）與 Arm（Cortex-M33）兩種目標做過語法檢查；`.pio` 範例用 SDK 內的 `pioasm` 實際組譯過；RISC-V 指令用 clang 以 RP2350 的 `-march` 實際組譯過；pthread / 位元運算範例在 Linux 上編譯執行過。
 > 標 **未查證** 的是沒能對到一手來源的，用之前先在考場文件確認。
 >
 > **整套檔案**（請全部放在同一個 Gist 或同一個資料夾，連結才會通）：
 > - [00-START.md](00-START.md)：**考試當天從這裡開始**：流程、出事怎麼辦、每段貼給小模型要多少 token
 > - [solutions.md](solutions.md)：18 種預測題型的完整優化解答，開頭有「題目長這樣 → 跳到哪」與每題的全層疊加配方
-> - [prompts.md](prompts.md)：貼給考場小模型的 prompt（通用一份 + 每種題型一份 + 編譯錯誤、找瓶頸、ROS 2 除錯、對拍）
+> - [prompts.md](prompts.md)：貼給考場小模型的 prompt（通用一份 + 每種題型一份 + 編譯錯誤、找瓶頸、對拍）
 > - [methodology.md](methodology.md)：優化方法論，小模型不可靠時照著一步步硬解
 > - [rp2350-riscv.md](rp2350-riscv.md)：Hazard3 RISC-V 冷門知識（判斷板子與架構、可用指令、行內組語、週期計數、從 Arm 搬過來的坑）
 > - [build-and-debug.md](build-and-debug.md)：CMake 範本、建置、燒錄、計時與對拍工具、當機診斷
-> - [optimization.md](optimization.md)：量測方法、記憶體放置、編譯器、演算法微技巧、DMA 乒乓 / PIO / 雙核心、時脈、pthread、ROS 2
+> - [optimization.md](optimization.md)：量測方法、記憶體放置、編譯器、演算法微技巧、DMA 乒乓 / PIO / 雙核心、時脈、pthread
 > - [algorithms.md](algorithms.md)：數論、圖論（計數、取模、質數、gcd、最短路、連通、DP）
 
 ## 目錄
@@ -21,7 +23,6 @@
 4. 同步與雙核心（spin lock / critical section / mutex / multicore / pthread）
 5. 效能優化
 6. RISC-V（RV32 / Hazard3）
-7. ROS 2 Jazzy（rclpy / rclcpp / CLI）
 8. 建置（CMake、pioasm、平台）
 9. 讓考場的小模型不亂編：prompt 範本
 10. 常見坑總表
@@ -947,147 +948,14 @@ C 端宣告：`uint32_t asm_sum(const uint32_t *a, uint32_t n);`，CMake `add_ex
 
 ---
 
-## 7. ROS 2 Jazzy
-
-### 7.1 rclpy 範本（對照 jazzy 分支 rclpy 原始碼；Python 語法檢查過）
-
-```python
-"""一支同時示範 publisher、subscriber、timer、QoS、參數的 rclpy node。"""
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from rclpy.qos import qos_profile_sensor_data
-from std_msgs.msg import Int32, String
-
-
-class Worker(Node):
-    def __init__(self):
-        super().__init__('worker')                       # node 名稱 -> /worker
-        self.declare_parameter('gain', 2)                # ros2 param set /worker gain 3
-        qos = QoSProfile(depth=10,
-                         reliability=ReliabilityPolicy.RELIABLE,
-                         history=HistoryPolicy.KEEP_LAST,
-                         durability=DurabilityPolicy.VOLATILE)
-        self.sub = self.create_subscription(Int32, '/number', self.on_msg, qos)
-        self.pub = self.create_publisher(Int32, '/double', qos)
-        self.log_pub = self.create_publisher(String, '/status', 10)   # 10 = depth 的簡寫
-        self.sensor_sub = self.create_subscription(Int32, '/sensor', self.on_msg, qos_profile_sensor_data)
-        self.timer = self.create_timer(0.5, self.tick)   # 秒；0.5 = 2 Hz
-        self.count = 0
-
-    def on_msg(self, msg):
-        gain = self.get_parameter('gain').value
-        out = Int32()
-        out.data = msg.data * gain
-        self.pub.publish(out)
-        self.count += 1
-
-    def tick(self):
-        s = String()
-        s.data = f'handled {self.count}'
-        self.log_pub.publish(s)
-        self.get_logger().info(s.data)
-
-
-def main():
-    rclpy.init()
-    node = Worker()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.try_shutdown()
-
-
-if __name__ == '__main__':
-    main()
-```
-
-| rclpy | 簽名重點 |
-|---|---|
-| `rclpy.init()` / `rclpy.spin(node)` / `rclpy.spin_once(node, timeout_sec=0.1)` / `rclpy.try_shutdown()` / `rclpy.shutdown()` / `rclpy.ok()` | |
-| `Node.create_publisher(msg_type, topic, qos_profile)` | qos 可給 `int` = depth |
-| `Node.create_subscription(msg_type, topic, callback, qos_profile)` | callback 在 qos **前面** |
-| `Node.create_timer(timer_period_sec, callback)` | 秒，float |
-| `Node.create_service(srv_type, name, callback)` / `create_client(srv_type, name)` | |
-| `Node.declare_parameter(name, value)` / `get_parameter(name).value` | |
-| `Node.get_logger().info(...)` / `.warning(...)` / `.error(...)` | |
-| `QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE / BEST_EFFORT, history=HistoryPolicy.KEEP_LAST / KEEP_ALL, durability=DurabilityPolicy.VOLATILE / TRANSIENT_LOCAL)` | `from rclpy.qos import ...` |
-| 預設組：`qos_profile_sensor_data`（BEST_EFFORT）、`qos_profile_system_default`、`qos_profile_services_default` | |
-| `from rclpy.executors import MultiThreadedExecutor, SingleThreadedExecutor`；`ex.add_node(n)`；`ex.spin()` | |
-| `from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup` | |
-
-**QoS 不相容就收不到**：publisher 是 BEST_EFFORT、subscriber 要 RELIABLE → 不連線、不報錯。用 `ros2 topic info -v /topic` 看兩邊 QoS。
-
-### 7.2 rclcpp 範本（名稱對照 jazzy 分支 rclcpp 標頭；**未實際編譯**）
-
-```cpp
-#include <chrono>
-#include <memory>
-#include "rclcpp/rclcpp.hpp"
-#include "std_msgs/msg/int32.hpp"
-using namespace std::chrono_literals;
-
-class Doubler : public rclcpp::Node {
-public:
-  Doubler() : Node("doubler") {
-    pub_ = create_publisher<std_msgs::msg::Int32>("/double", 10);
-    sub_ = create_subscription<std_msgs::msg::Int32>(
-      "/number", rclcpp::QoS(10).reliable(),
-      [this](const std_msgs::msg::Int32 & msg) {
-        std_msgs::msg::Int32 out;
-        out.data = msg.data * 2;
-        pub_->publish(out);
-      });
-    timer_ = create_wall_timer(500ms, [this]() { RCLCPP_INFO(get_logger(), "alive"); });
-  }
-
-private:
-  rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr pub_;
-  rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr sub_;
-  rclcpp::TimerBase::SharedPtr timer_;
-};
-
-int main(int argc, char ** argv) {
-  rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<Doubler>());
-  rclcpp::shutdown();
-  return 0;
-}
-```
-QoS：`rclcpp::QoS(10).reliable()` / `.best_effort()` / `.transient_local()` / `.durability_volatile()` / `.keep_last(n)` / `.keep_all()`；`rclcpp::SensorDataQoS()`、`rclcpp::SystemDefaultsQoS()`。
-
-### 7.3 ros2 CLI（對照 jazzy 分支 ros2cli）
-
-| 指令 | 用途 |
-|---|---|
-| `ros2 node list` / `ros2 node info /node` | node 與其 pub/sub |
-| `ros2 topic list -t` | 列 topic 含型別 |
-| `ros2 topic info /t -v` | 型別、pub/sub 數、**各端 QoS** |
-| `ros2 interface show std_msgs/msg/Int32` | 訊息欄位 |
-| `ros2 topic echo /t` / `--once` / `--field data` | 看資料 |
-| `ros2 topic hz /t` / `ros2 topic bw /t` | 頻率 / 頻寬 |
-| `ros2 topic pub --once /t std_msgs/msg/Int32 "{data: 21}"` | 發一筆 |
-| `ros2 topic pub -r 10 /t std_msgs/msg/Int32 "{data: 1}"` / `-t 5`（發 5 次） | 固定頻率 |
-| `ros2 topic pub ... --qos-reliability best_effort` | echo/pub/hz 都有 `--qos-*` 參數 |
-| `ros2 service list` / `ros2 service type /s` / `ros2 service call /s pkg/srv/T "{...}"` | |
-| `ros2 param list` / `ros2 param get /n p` / `ros2 param set /n p v` / `ros2 param dump /n` | |
-| `ros2 run <pkg> <exe>` / `ros2 pkg create --build-type ament_python --node-name n my_pkg` | |
-| `ros2 doctor` / `ros2 doctor hello` | 環境 / 網路檢查 |
-| 環境變數 `ROS_DOMAIN_ID` | 不同 ID 互相看不到 |
-
-除錯順序（練習題 2-1）：node 在嗎 → topic 在嗎 → 兩端名稱一樣嗎（差一個字就是另一個 topic）→ pub/sub 數合理嗎 → QoS 相容嗎 → 真的有資料嗎（echo / hz）→ 用 `topic pub` 餵已知值再 echo 輸出。
-
----
-
 ## 8. 建置
 
 ### 8.1 pico-sdk CMakeLists.txt
 
 ```cmake
 cmake_minimum_required(VERSION 3.13)
+list(APPEND PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR}/boards)   # 考場板子 RP2350B，見 board.md
+set(PICO_BOARD exam_rp2350b)            # 不要用 pico2：那是 RP2350A，GPIO 30–47 不能用
 include(pico_sdk_import.cmake)          # 從 pico-sdk/external/ 複製過來
 project(app C CXX ASM)
 set(CMAKE_C_STANDARD 11)
@@ -1107,23 +975,12 @@ pico_add_extra_outputs(app)                    # 產生 .uf2 / .hex / .bin
 
 ```bash
 mkdir build && cd build
-cmake -DPICO_BOARD=pico2 -DPICO_PLATFORM=rp2350-riscv ..   # RISC-V 核心
-# cmake -DPICO_BOARD=pico2 -DPICO_PLATFORM=rp2350-arm-s .. # Arm 核心（pico2 預設）
+cmake -DPICO_PLATFORM=rp2350-riscv ..   # RISC-V 核心
+# cmake -DPICO_PLATFORM=rp2350-arm-s .. # Arm 核心
 make -j
 ```
 平台名稱（SDK 原文）：`rp2040`、`rp2350`、`rp2350-arm-s`、`rp2350-riscv`、`host`。
 程式內判斷：`#if PICO_RP2350`、`#if PICO_RISCV`、`#if defined(__riscv)`。
-
-### 8.2 ament（ROS 2）
-
-```bash
-colcon build --symlink-install            # 在 workspace 根目錄
-colcon build --packages-select my_pkg
-source install/setup.bash
-```
-ament_cmake 的 CMakeLists 主要幾行：`find_package(ament_cmake REQUIRED)`、`find_package(rclcpp REQUIRED)`、`find_package(std_msgs REQUIRED)`、`add_executable(doubler src/doubler.cpp)`、`ament_target_dependencies(doubler rclcpp std_msgs)`、`install(TARGETS doubler DESTINATION lib/${PROJECT_NAME})`、`ament_package()`。（colcon 與 ament_cmake 未對照原始碼，屬常用寫法）
-
----
 
 ## 9. 讓考場的小模型不亂編：prompt 範本
 
@@ -1189,5 +1046,4 @@ ament_cmake 的 CMakeLists 主要幾行：`find_package(ament_cmake REQUIRED)`�
 ### 未查證 / 限制
 
 - RP2350 datasheet PDF 這次抓不到，PIO 指令細節以 SDK 的 pioasm 原始碼與 RP2040 時代的既有行為為準；`mov` 到 ISR/OSR 會不會重設移位計數等細節（`pull noblock` 空時載入 X 已由 pico-examples 確認），考前若有時間對一下 datasheet PIO 章節。
-- rclcpp 範本與 colcon / ament_cmake 寫法只對照名稱，沒有實際編譯。
 - 硬體行為（時序、實際效能數字）都沒有在開發板上跑過。
