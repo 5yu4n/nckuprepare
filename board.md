@@ -213,6 +213,15 @@ i2c_read_timeout_us(i2c0, addr, &v, 1, false, 5000);
 - 一律用 `_timeout_us` 版本：線沒接或位址錯時 `_blocking` 版可能卡住。回傳負數 = 失敗（`PICO_ERROR_GENERIC` = 沒 ACK、`PICO_ERROR_TIMEOUT`）。
 - 先掃描（`i2c_scan`）知道有哪些位址。常見位址（記憶，以 datasheet 為準）：MPU6050 0x68/0x69、WHO_AM_I 在 0x75 → 0x68；ICM-42688 0x68/0x69、0x75 → 0x47；LSM6DS3/DSO 0x6A/0x6B、0x0F → 0x69/0x6C；QMI8658 0x6A/0x6B、0x00 → 0x05；SSD1306 OLED 0x3C；VL53L0X 0x29。
 - pico-examples 有現成驅動可抄：`i2c/mpu6050_i2c`、`i2c/ssd1306_i2c`、`i2c/bus_scan`。
+- MPU6050 範例（暫存器取自 pico-examples `mpu6050_i2c`）：寫 0x6B = 0x80 重置、等 100 ms、寫 0x6B = 0x00 喚醒；從 0x3B 一次讀 14 bytes = 加速度 xyz、溫度、陀螺儀 xyz（各 2 bytes 大端）。溫度 °C = raw / 340 + 36.53。預設量程下加速度 16384 = 1 g、陀螺儀 131 = 1 °/s（量程數字是記憶，看 datasheet 確認）。
+```c
+uint8_t b[14];
+if (i2c_reg_read(i2c0, 0x68, 0x3B, b, 14) == 14) {            // 一次 burst，比分三次讀快
+    int16_t ax = (int16_t)(b[0] << 8 | b[1]), ay = (int16_t)(b[2] << 8 | b[3]), az = (int16_t)(b[4] << 8 | b[5]);
+    int16_t gx = (int16_t)(b[8] << 8 | b[9]), gy = (int16_t)(b[10] << 8 | b[11]), gz = (int16_t)(b[12] << 8 | b[13]);
+}
+```
+- 角度積分（轉向角）：`yaw += gz_dps * dt`；開機先靜止讀 200 次平均當偏移量扣掉，不然會漂。
 - 16 位元感測值通常是大端：`int16_t x = (int16_t)(buf[0] << 8 | buf[1]);`（ST 的晶片多半是小端，看 datasheet）。
 
 ## 11. SPI LCD（J3：SCL SDA RST DC CS BL）
